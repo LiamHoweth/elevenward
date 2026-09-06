@@ -1,0 +1,71 @@
+{
+  "engine": "CareerSnapshot+WeeklySimulator+WorldSimulator+CareerEngine",
+  "careers": 5000,
+  "startIndex": 85000,
+  "weeks": 1540800,
+  "positionCounts": {
+    "winger": 1250,
+    "midfielder": 1251,
+    "defender": 1251,
+    "striker": 1248
+  },
+  "archetypeCounts": {
+    "invertedWinger": 417,
+    "wideCreator": 417,
+    "playmaker": 417,
+    "boxToBox": 417,
+    "ballWinner": 417,
+    "stopper": 417,
+    "ballPlayingCentreBack": 417,
+    "attackingFullback": 417,
+    "poacher": 416,
+    "targetForward": 416,
+    "completeForward": 416,
+    "touchlineWinger": 416
+  },
+  "difficultyCounts": {
+    "story": 1664,
+    "professional": 1668,
+    "worldClass": 1668
+  },
+  "startingLeagueCounts": {
+    "brazil-first": 680,
+    "brazil-second": 720,
+    "united-states-first": 360,
+    "united-states-second": 360,
+    "england-first": 360,
+    "england-second": 360,
+    "spain-first": 360,
+    "spain-second": 360,
+    "france-first": 360,
+    "france-second": 360,
+    "germany-first": 360,
+    "germany-second": 360
+  },
+  "retirementSeasonCounts": {
+    "20": 1400,
+    "16": 3600
+  },
+  "competitionCompletions": {
+    "domesticCup": 513600,
+    "internationalClub": 85600,
+    "nationalTournament": 21400
+  },
+  "transferCounts": {
+    "stayed": 54943,
+    "sameNation": 5406,
+    "international": 20251
+  },
+  "nationalTeamDecisionCounts": {
+    "accepted": 10699,
+    "declined": 10700
+  },
+  "leagueMovementCounts": {
+    "promoted": 5740,
+    "relegated": 720,
+    "unchanged": 48483
+  },
+  "failures": [],
+  "checksum": "e9888c8c",
+  "passed": true
+}

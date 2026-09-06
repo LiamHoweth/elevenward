@@ -1,0 +1,174 @@
+{
+  "passed": true,
+  "careers": 100000,
+  "weeks": 32178240,
+  "coverage": {
+    "positionCounts": {
+      "striker": 25002,
+      "winger": 25000,
+      "midfielder": 24999,
+      "defender": 24999
+    },
+    "archetypeCounts": {
+      "poacher": 8334,
+      "targetForward": 8334,
+      "completeForward": 8334,
+      "touchlineWinger": 8334,
+      "invertedWinger": 8333,
+      "wideCreator": 8333,
+      "playmaker": 8333,
+      "boxToBox": 8333,
+      "ballWinner": 8333,
+      "stopper": 8333,
+      "ballPlayingCentreBack": 8333,
+      "attackingFullback": 8333
+    },
+    "difficultyCounts": {
+      "story": 33336,
+      "professional": 33336,
+      "worldClass": 33328
+    },
+    "startingLeagueCounts": {
+      "england-first": 8640,
+      "england-second": 8560,
+      "spain-first": 8280,
+      "spain-second": 8280,
+      "france-first": 8280,
+      "france-second": 8280,
+      "germany-first": 8280,
+      "germany-second": 8280,
+      "brazil-first": 8280,
+      "brazil-second": 8280,
+      "united-states-first": 8280,
+      "united-states-second": 8280
+    },
+    "retirementSeasonCounts": {
+      "16": 21600,
+      "17": 21600,
+      "18": 21600,
+      "19": 17920,
+      "20": 17280
+    },
+    "competitionCompletions": {
+      "domesticCup": 10726080,
+      "internationalClub": 1787680,
+      "nationalTournament": 417280
+    },
+    "transferCounts": {
+      "stayed": 1135999,
+      "sameNation": 107904,
+      "international": 443777
+    },
+    "nationalTeamDecisionCounts": {
+      "accepted": 208615,
+      "declined": 208625
+    },
+    "leagueMovementCounts": {
+      "promoted": 115140,
+      "relegated": 15094,
+      "unchanged": 1005765
+    }
+  },
+  "shards": [
+    {
+      "startIndex": 0,
+      "careers": 5000,
+      "checksum": "42a4943b"
+    },
+    {
+      "startIndex": 5000,
+      "careers": 5000,
+      "checksum": "da651331"
+    },
+    {
+      "startIndex": 10000,
+      "careers": 5000,
+      "checksum": "d66e04f2"
+    },
+    {
+      "startIndex": 15000,
+      "careers": 5000,
+      "checksum": "e3c734cf"
+    },
+    {
+      "startIndex": 20000,
+      "careers": 5000,
+      "checksum": "bcb38fd3"
+    },
+    {
+      "startIndex": 25000,
+      "careers": 5000,
+      "checksum": "b96f083e"
+    },
+    {
+      "startIndex": 30000,
+      "careers": 5000,
+      "checksum": "c2dff6c8"
+    },
+    {
+      "startIndex": 35000,
+      "careers": 5000,
+      "checksum": "13fee500"
+    },
+    {
+      "startIndex": 40000,
+      "careers": 5000,
+      "checksum": "9d55cf2a"
+    },
+    {
+      "startIndex": 45000,
+      "careers": 5000,
+      "checksum": "f485b207"
+    },
+    {
+      "startIndex": 50000,
+      "careers": 5000,
+      "checksum": "22ec44ff"
+    },
+    {
+      "startIndex": 55000,
+      "careers": 5000,
+      "checksum": "cbcf2b4d"
+    },
+    {
+      "startIndex": 60000,
+      "careers": 5000,
+      "checksum": "eb15a573"
+    },
+    {
+      "startIndex": 65000,
+      "careers": 5000,
+      "checksum": "a2bba7f1"
+    },
+    {
+      "startIndex": 70000,
+      "careers": 5000,
+      "checksum": "340178f6"
+    },
+    {
+      "startIndex": 75000,
+      "careers": 5000,
+      "checksum": "0f79d989"
+    },
+    {
+      "startIndex": 80000,
+      "careers": 5000,
+      "checksum": "f370f93b"
+    },
+    {
+      "startIndex": 85000,
+      "careers": 5000,
+      "checksum": "e9888c8c"
+    },
+    {
+      "startIndex": 90000,
+      "careers": 5000,
+      "checksum": "c6f98925"
+    },
+    {
+      "startIndex": 95000,
+      "careers": 5000,
+      "checksum": "959a9c20"
+    }
+  ]
+}

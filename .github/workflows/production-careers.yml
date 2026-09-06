@@ -1,0 +1,51 @@
+name: 100k production careers
+
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.2'
+      - run: cd packages/elevenward_core && dart pub get
+      - name: Run 5,000 full production careers
+        run: cd packages/elevenward_core && dart run bin/verify_production_careers.dart --careers 5000 --start $(( ${{ matrix.shard }} * 5000 )) --output ../../artifacts/verification/production-shard-${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-careers-${{ matrix.shard }}
+          path: artifacts/verification/production-shard-${{ matrix.shard }}.json
+          retention-days: 90
+
+  release-gate:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: '3.13.2'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: production-careers-*
+          path: artifacts/verification
+          merge-multiple: true
+      - name: Require all 100,000 real careers and coverage dimensions
+        run: dart packages/elevenward_core/bin/merge_production_reports.dart --output artifacts/verification/production-100000.json artifacts/verification/production-shard-*.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: production-careers-aggregate
+          path: artifacts/verification/production-100000.json
+          retention-days: 90

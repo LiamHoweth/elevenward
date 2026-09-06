@@ -1,0 +1,52 @@
+{
+  "careers": 100000,
+  "weeks": 32397120,
+  "positionCounts": {
+    "striker": 25000,
+    "winger": 25000,
+    "midfielder": 25000,
+    "defender": 25000
+  },
+  "difficultyCounts": {
+    "story": 33336,
+    "professional": 33332,
+    "worldClass": 33332
+  },
+  "leagueCounts": {
+    "england-first": 8340,
+    "england-second": 8340,
+    "spain-first": 8340,
+    "spain-second": 8340,
+    "france-first": 8340,
+    "france-second": 8332,
+    "germany-first": 8328,
+    "germany-second": 8328,
+    "brazil-first": 8328,
+    "brazil-second": 8328,
+    "united-states-first": 8328,
+    "united-states-second": 8328
+  },
+  "movementCounts": {
+    "promoted": 180523,
+    "relegated": 180254,
+    "unchanged": 1439063
+  },
+  "transferCounts": {
+    "stayed": 273318,
+    "sameNation": 273309,
+    "international": 273309
+  },
+  "retirementSeasonCounts": {
+    "16": 20016,
+    "17": 20016,
+    "18": 20016,
+    "19": 20016,
+    "20": 19936
+  },
+  "nationalTournamentCycles": 419936,
+  "failures": [],
+  "checksum": "fa07869f",
+  "passed": true,
+  "elapsedMilliseconds": 1114,
+  "generatedAt": "2026-09-04T04:41:18.962532Z"
+}

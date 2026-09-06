@@ -1,0 +1,43 @@
+name: Elevenward CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  flutter:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+      - run: cd packages/elevenward_core && dart analyze && dart test
+      - run: cd packages/elevenward_core && dart run bin/verify_production_careers.dart --careers 100 --output ../../artifacts/verification/production-smoke.json
+      - run: flutter build apk --debug
+      - run: flutter build ios --simulator --no-codesign
+
+  secrets-and-dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: '3.47.2'
+          cache: true
+      - run: flutter pub get
+      - run: dart pub outdated --no-dev-dependencies
+      - run: bash tool/check_release_assets.sh

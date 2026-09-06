@@ -1,0 +1,50 @@
+{
+  "engine": "CareerSnapshot+WeeklySimulator+WorldSimulator+CareerEngine",
+  "careers": 100,
+  "startIndex": 0,
+  "weeks": 28800,
+  "positionCounts": {
+    "striker": 27,
+    "winger": 25,
+    "midfielder": 24,
+    "defender": 24
+  },
+  "archetypeCounts": {
+    "poacher": 9,
+    "targetForward": 9,
+    "completeForward": 9,
+    "touchlineWinger": 9,
+    "invertedWinger": 8,
+    "wideCreator": 8,
+    "playmaker": 8,
+    "boxToBox": 8,
+    "ballWinner": 8,
+    "stopper": 8,
+    "ballPlayingCentreBack": 8,
+    "attackingFullback": 8
+  },
+  "difficultyCounts": {
+    "story": 36,
+    "professional": 36,
+    "worldClass": 28
+  },
+  "startingLeagueCounts": {
+    "england-first": 100
+  },
+  "retirementSeasonCounts": {
+    "16": 100
+  },
+  "competitionCompletions": {
+    "domesticCup": 9600,
+    "internationalClub": 1600,
+    "nationalTournament": 400
+  },
+  "transferCounts": {
+    "stayed": 1029,
+    "sameNation": 88,
+    "international": 383
+  },
+  "failures": [],
+  "checksum": "d7002f28",
+  "passed": true
+}

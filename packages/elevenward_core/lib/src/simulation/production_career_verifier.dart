@@ -1,0 +1,320 @@
+import '../content/content_catalog.dart';
+import '../model/career_snapshot.dart';
+import '../model/career_types.dart';
+import '../model/enums.dart';
+import '../model/player_state.dart';
+import '../model/weekly_models.dart';
+import '../world/world_generator.dart';
+import '../world/world_models.dart';
+import 'career_engine.dart';
+import 'weekly_simulator.dart';
+import 'world_simulator.dart';
+
+final class ProductionCareerVerificationReport {
+  const ProductionCareerVerificationReport({
+    required this.careers,
+    required this.startIndex,
+    required this.weeks,
+    required this.positionCounts,
+    required this.archetypeCounts,
+    required this.difficultyCounts,
+    required this.startingLeagueCounts,
+    required this.retirementSeasonCounts,
+    required this.competitionCompletions,
+    required this.transferCounts,
+    required this.nationalTeamDecisionCounts,
+    required this.leagueMovementCounts,
+    required this.failures,
+    required this.checksum,
+  });
+
+  final int careers;
+  final int startIndex;
+  final int weeks;
+  final Map<String, int> positionCounts;
+  final Map<String, int> archetypeCounts;
+  final Map<String, int> difficultyCounts;
+  final Map<String, int> startingLeagueCounts;
+  final Map<String, int> retirementSeasonCounts;
+  final Map<String, int> competitionCompletions;
+  final Map<String, int> transferCounts;
+  final Map<String, int> nationalTeamDecisionCounts;
+  final Map<String, int> leagueMovementCounts;
+  final List<String> failures;
+  final String checksum;
+
+  bool get passed => failures.isEmpty;
+
+  Map<String, Object?> toJson() => {
+        'engine': 'CareerSnapshot+WeeklySimulator+WorldSimulator+CareerEngine',
+        'careers': careers,
+        'startIndex': startIndex,
+        'weeks': weeks,
+        'positionCounts': positionCounts,
+        'archetypeCounts': archetypeCounts,
+        'difficultyCounts': difficultyCounts,
+        'startingLeagueCounts': startingLeagueCounts,
+        'retirementSeasonCounts': retirementSeasonCounts,
+        'competitionCompletions': competitionCompletions,
+        'transferCounts': transferCounts,
+        'nationalTeamDecisionCounts': nationalTeamDecisionCounts,
+        'leagueMovementCounts': leagueMovementCounts,
+        'failures': failures,
+        'checksum': checksum,
+        'passed': passed,
+      };
+}
+
+/// Release verifier that drives the same immutable state and simulation APIs as
+/// the Flutter application. It supports deterministic shards so CI runners can
+/// collectively qualify 100,000 full careers without a synthetic substitute.
+final class ProductionCareerVerifier {
+  const ProductionCareerVerifier();
+
+  static const _weekly = WeeklySimulator();
+  static const _world = WorldSimulator();
+  static const _engine = CareerEngine();
+
+  ProductionCareerVerificationReport run({
+    int careers = 100000,
+    int startIndex = 0,
+  }) {
+    if (careers < 1) throw ArgumentError.value(careers, 'careers');
+    if (startIndex < 0) throw ArgumentError.value(startIndex, 'startIndex');
+    final world = buildLaunchWorld();
+    final catalog = buildLaunchContent();
+    final positions = <String, int>{};
+    final archetypes = <String, int>{};
+    final difficulties = <String, int>{};
+    final leagues = <String, int>{};
+    final retirementSeasons = <String, int>{};
+    final competitionCompletions = <String, int>{
+      'domesticCup': 0,
+      'internationalClub': 0,
+      'nationalTournament': 0,
+    };
+    final transfers = <String, int>{
+      'stayed': 0,
+      'sameNation': 0,
+      'international': 0,
+    };
+    final nationalTeamDecisions = <String, int>{
+      'accepted': 0,
+      'declined': 0,
+    };
+    final leagueMovements = <String, int>{
+      'promoted': 0,
+      'relegated': 0,
+      'unchanged': 0,
+    };
+    final failures = <String>[];
+    var weeks = 0;
+    var checksum = 0x811c9dc5;
+
+    for (var offset = 0; offset < careers; offset++) {
+      final index = startIndex + offset;
+      final archetype = Archetype.values[index % Archetype.values.length];
+      final difficulty =
+          Difficulty.values[(index ~/ Archetype.values.length) % 3];
+      final club = world.clubs[(index ~/ 36) % world.clubs.length];
+      final league = world.leagues.firstWhere(
+        (item) => item.clubIds.contains(club.id),
+      );
+      final targetRetirementSeason = 16 + ((index ~/ 4320) % 5);
+      final transferMode = index % 3;
+      positions.update(
+        archetype.positionFamily.name,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+      archetypes.update(
+        archetype.name,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+      difficulties.update(
+        difficulty.name,
+        (value) => value + 1,
+        ifAbsent: () => 1,
+      );
+      leagues.update(league.id, (value) => value + 1, ifAbsent: () => 1);
+
+      var snapshot = CareerSnapshot.newCareer(
+        careerId: 'verify-$index',
+        seed: index + 1,
+        updatedAt: DateTime.utc(2026, 1, 1),
+        clubId: club.id,
+        clubName: club.name,
+        contentVersion: catalog.version,
+        difficulty: difficulty,
+        player: PlayerState.newCareer(
+          id: 'player-$index',
+          name: 'Verifier',
+          archetype: archetype,
+          nationalTeamId:
+              world.nationalTeams[index % world.nationalTeams.length].id,
+        ),
+      );
+      final startingClub = snapshot.clubId;
+      try {
+        while (!snapshot.retired) {
+          while (snapshot.phase == CareerPhase.inSeason) {
+            if (_engine.hasNationalTeamInvitation(snapshot)) {
+              final decision = index.isEven ? 'accepted' : 'declined';
+              snapshot = _engine.decideNationalTeamCallUp(
+                snapshot: snapshot,
+                accept: index.isEven,
+                updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+              );
+              nationalTeamDecisions[decision] =
+                  nationalTeamDecisions[decision]! + 1;
+            }
+            final opponent = _world.opponentFor(snapshot, definition: world);
+            final situations = catalog.matchSituations
+                .where((item) => item.position == snapshot.player.position)
+                .toList(growable: false);
+            final situation = situations[
+                (snapshot.seed ^ snapshot.revision).abs() % situations.length];
+            final approach =
+                SpotlightApproach.values[(snapshot.seed + snapshot.week) % 3];
+            final option = situation.options.firstWhere(
+              (item) => item.approach == approach,
+            );
+            snapshot = _weekly
+                .advance(
+                  snapshot: snapshot,
+                  choice: WeeklyChoice(
+                    focus: PlayerAttribute.values[
+                        (snapshot.seed + snapshot.week) %
+                            PlayerAttribute.values.length],
+                    intensity: TrainingIntensity
+                        .values[(snapshot.season + snapshot.week + index) % 3],
+                    spotlightApproach: approach,
+                  ),
+                  opponent: opponent,
+                  situationOption: option,
+                  updatedAt: snapshot.updatedAt.add(const Duration(days: 7)),
+                )
+                .snapshot;
+            final events = _engine.eligibleEvents(snapshot, catalog);
+            if (events.isEmpty) {
+              weeks += 1;
+              continue;
+            }
+            final event = events[
+                (snapshot.seed ^ snapshot.revision).abs() % events.length];
+            final choice = event.choices[
+                (snapshot.seed + snapshot.week) % event.choices.length];
+            snapshot = _engine.applyEventChoice(
+              snapshot: snapshot,
+              event: event,
+              choice: choice,
+              updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+            );
+            weeks += 1;
+          }
+          for (final progress in snapshot.world.competitions.values) {
+            if (!progress.isComplete) continue;
+            competitionCompletions.update(
+              progress.kind.name,
+              (value) => value + 1,
+              ifAbsent: () => 1,
+            );
+          }
+          ContractOffer? offer;
+          if (snapshot.season.isEven && transferMode != 0) {
+            final offers = _engine.contractOffers(snapshot, definition: world);
+            offer = offers.isEmpty ? null : offers.first;
+          }
+          if (snapshot.contract.seasonsRemaining <= 1 &&
+              offer == null &&
+              _engine.renewalOffer(snapshot, definition: world) == null) {
+            final offers = _engine.contractOffers(snapshot, definition: world);
+            if (offers.isNotEmpty) offer = offers.first;
+          }
+          final beforeClub = snapshot.clubId;
+          final beforeLeague = snapshot.world.leagueIdForClub(beforeClub);
+          snapshot = _engine.completeOffseason(
+            snapshot,
+            acceptedOffer: offer,
+            retire: snapshot.season == targetRetirementSeason,
+            definition: world,
+            updatedAt: snapshot.updatedAt.add(const Duration(days: 21)),
+          );
+          if (snapshot.retired) break;
+          if (snapshot.clubId == beforeClub) {
+            final afterLeague = snapshot.world.leagueIdForClub(snapshot.clubId);
+            final beforeDivision = world.leagues
+                .firstWhere((item) => item.id == beforeLeague)
+                .division;
+            final afterDivision = world.leagues
+                .firstWhere((item) => item.id == afterLeague)
+                .division;
+            final movement = beforeDivision == afterDivision
+                ? 'unchanged'
+                : beforeDivision == DivisionLevel.second
+                    ? 'promoted'
+                    : 'relegated';
+            leagueMovements[movement] = leagueMovements[movement]! + 1;
+          }
+          if (snapshot.clubId == beforeClub) {
+            transfers['stayed'] = transfers['stayed']! + 1;
+          } else {
+            final beforeNation =
+                world.clubs.firstWhere((item) => item.id == beforeClub).nation;
+            final afterNation = world.clubs
+                .firstWhere((item) => item.id == snapshot.clubId)
+                .nation;
+            final key =
+                beforeNation == afterNation ? 'sameNation' : 'international';
+            transfers[key] = transfers[key]! + 1;
+          }
+        }
+        if (snapshot.seasonHistory.length != targetRetirementSeason) {
+          failures.add(
+            'career $index retired after ${snapshot.seasonHistory.length} seasons, expected $targetRetirementSeason',
+          );
+        }
+        if (snapshot.contract.clubId != snapshot.clubId) {
+          failures.add('career $index contract and club diverged');
+        }
+        retirementSeasons.update(
+          '${snapshot.seasonHistory.length}',
+          (value) => value + 1,
+          ifAbsent: () => 1,
+        );
+        checksum = _mixString(checksum, snapshot.encode());
+        checksum = _mixString(checksum, startingClub);
+      } on Object catch (error) {
+        failures.add('career $index failed: $error');
+      }
+      if (failures.length >= 100) break;
+    }
+
+    return ProductionCareerVerificationReport(
+      careers: careers,
+      startIndex: startIndex,
+      weeks: weeks,
+      positionCounts: Map.unmodifiable(positions),
+      archetypeCounts: Map.unmodifiable(archetypes),
+      difficultyCounts: Map.unmodifiable(difficulties),
+      startingLeagueCounts: Map.unmodifiable(leagues),
+      retirementSeasonCounts: Map.unmodifiable(retirementSeasons),
+      competitionCompletions: Map.unmodifiable(competitionCompletions),
+      transferCounts: Map.unmodifiable(transfers),
+      nationalTeamDecisionCounts: Map.unmodifiable(nationalTeamDecisions),
+      leagueMovementCounts: Map.unmodifiable(leagueMovements),
+      failures: List.unmodifiable(failures),
+      checksum: checksum.toUnsigned(32).toRadixString(16).padLeft(8, '0'),
+    );
+  }
+
+  int _mixString(int checksum, String value) {
+    var result = checksum;
+    for (final unit in value.codeUnits) {
+      result ^= unit;
+      result = (result * 0x01000193) & 0xffffffff;
+    }
+    return result;
+  }
+}
