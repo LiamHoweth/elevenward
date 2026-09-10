@@ -8,12 +8,12 @@ explicit national-team call-ups, career/life choices, and progression from age
 
 ## What is playable
 
-1. Choose a weekly attribute focus and training load.
-2. Review selection status and the next opponent.
+1. Choose a persistent weekly attribute focus and a fresh training load.
+2. Preview the home-versus-away matchup and review selection status.
 3. Resolve a spotlight moment with safe, balanced, or bold intent.
-4. See a transparent match receipt with the exact chance, seeded roll, causal
-   factors, rating, progression, money, and reputation.
-5. Resolve an off-pitch beat and continue to the next fixture.
+4. Read a compact score, rating, development and income recap.
+5. Resolve an occasional compact off-pitch choice between fixtures, then inspect
+   completed scores in World.
 
 The interface only previews outcomes. All ratings, odds, seeded randomness,
 season progression, and durable state live in the platform-independent
@@ -56,6 +56,11 @@ four-language onboarding, opt-in leaderboards, and signed-content loading are
 implemented locally. Online/store flows still require production configuration
 and sandbox qualification. The website lives at `howethstudio.com/elevenward/`;
 the API uses `api.howethstudio.com/v1/elevenward/` within the same studio domain.
+
+The player-initiated Shop supports VIP Starter Pack, 2× Development, 2× Money
+and All-Access as permanent non-consumables. See
+[gamepass operations](docs/GAMEPASS_OPERATIONS.md) and the
+[experience specifications](docs/design/EXPERIENCE_SPEC.md).
 
 The game is not launch-ready. See [the live gap audit](docs/PRODUCT_GAP_AUDIT.md),
 [the release runbook](docs/RELEASE_RUNBOOK.md), and

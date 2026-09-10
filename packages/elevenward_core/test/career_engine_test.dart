@@ -7,7 +7,17 @@ void main() {
   const worldSimulator = WorldSimulator();
 
   CareerSnapshot playSeason(CareerSnapshot snapshot) {
-    while (snapshot.phase == CareerPhase.inSeason) {
+    while (snapshot.phase == CareerPhase.inSeason ||
+        snapshot.phase == CareerPhase.internationalCallup ||
+        snapshot.phase == CareerPhase.internationalTournament) {
+      if (snapshot.phase == CareerPhase.internationalCallup) {
+        snapshot = engine.decideNationalTeamCallUp(
+          snapshot: snapshot,
+          accept: true,
+          updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+        );
+        continue;
+      }
       final opponent = worldSimulator.opponentFor(snapshot);
       snapshot = weekly
           .advance(
@@ -79,6 +89,27 @@ void main() {
     expect(migrated.schemaVersion, CareerSnapshot.currentSchemaVersion);
   });
 
+  test('version-eight snapshots add an empty player league fixture ledger', () {
+    final json = CareerSnapshot.newCareer().toJson()..['schemaVersion'] = 8;
+    final world = (json['world'] as Map<String, Object?>)
+      ..remove('playerLeagueFixtures');
+    json['world'] = world;
+    final migrated = CareerSnapshot.fromJson(json);
+    expect(migrated.world.playerLeagueFixtures, isEmpty);
+    expect(migrated.schemaVersion, CareerSnapshot.currentSchemaVersion);
+  });
+
+  test('version-twelve snapshots add empty transfer-request state', () {
+    final json = CareerSnapshot.newCareer().toJson()
+      ..['schemaVersion'] = 12
+      ..remove('transferRequest')
+      ..remove('transferRequestTrustPenaltySeason');
+    final migrated = CareerSnapshot.fromJson(json);
+    expect(migrated.transferRequest, isNull);
+    expect(migrated.transferRequestTrustPenaltySeason, isNull);
+    expect(migrated.schemaVersion, CareerSnapshot.currentSchemaVersion);
+  });
+
   test('every historical field schema has a deterministic golden migration',
       () {
     const introducedAt = <String, int>{
@@ -99,8 +130,10 @@ void main() {
       'equippedItemIds': 5,
       'sponsorContracts': 7,
       'nationalTeam': 8,
+      'transferRequest': 13,
+      'transferRequestTrustPenaltySeason': 13,
     };
-    for (var version = 1; version <= 7; version++) {
+    for (var version = 1; version <= 8; version++) {
       final json = CareerSnapshot.newCareer(
         clubId: 'spain-solmera-cf',
         clubName: 'Solmera CF',
@@ -140,6 +173,80 @@ void main() {
         ),
       ),
     );
+  });
+
+  test('pre-world opening saves reconstruct only the legacy 120-club world',
+      () {
+    final json = CareerSnapshot.newCareer(
+      contentVersion: '2026.2.0',
+    ).toJson()
+      ..['schemaVersion'] = 2
+      ..remove('world');
+    final migrated = CareerSnapshot.fromJson(json);
+
+    expect(migrated.world.leagueParticipants, hasLength(12));
+    expect(
+      migrated.world.leagueParticipants.values.expand((ids) => ids).toSet(),
+      hasLength(120),
+    );
+  });
+
+  test('event income is boosted while penalties remain exact', () {
+    final snapshot = CareerSnapshot.newCareer(seed: 7001);
+    final events = buildLaunchContent().careerEvents;
+    final template = events.first;
+    final penalty = EventChoiceDefinition(
+      id: 'pay-penalty',
+      label: template.choices.first.label,
+      trustDelta: 0,
+      reputationDelta: 0,
+      moneyDelta: -751,
+      wellnessDelta: 0,
+    );
+    final negativeEvent = CareerEventDefinition(
+      id: 'test-penalty',
+      category: CareerEventCategory.reputation,
+      title: template.title,
+      body: template.body,
+      choices: [penalty],
+    );
+    final afterPenalty = engine.applyEventChoice(
+      snapshot: snapshot,
+      event: negativeEvent,
+      choice: penalty,
+      updatedAt: snapshot.updatedAt,
+      modifiers: const RewardModifiers(
+        moneyMultiplier: 3,
+        sourceIds: ['allAccess'],
+      ),
+    );
+    expect(
+      afterPenalty.player.money,
+      (snapshot.player.money + penalty.moneyDelta).clamp(0, 1 << 52),
+    );
+    expect(afterPenalty.boostIdsUsed, isEmpty);
+
+    final positiveEvent = events.firstWhere(
+      (event) => event.choices.any((choice) => choice.moneyDelta > 0),
+    );
+    final income = positiveEvent.choices.firstWhere(
+      (choice) => choice.moneyDelta > 0,
+    );
+    final afterIncome = engine.applyEventChoice(
+      snapshot: snapshot,
+      event: positiveEvent,
+      choice: income,
+      updatedAt: snapshot.updatedAt,
+      modifiers: const RewardModifiers(
+        moneyMultiplier: 1.5,
+        sourceIds: ['vip'],
+      ),
+    );
+    expect(
+      afterIncome.player.money,
+      snapshot.player.money + (income.moneyDelta * 1.5).round(),
+    );
+    expect(afterIncome.boostIdsUsed, ['vip']);
   });
 
   test('world week produces complete tables and a deterministic opponent', () {
@@ -188,11 +295,13 @@ void main() {
     expect(snapshot.seasonHistory, hasLength(1));
     expect(snapshot.clubId, offers.first.clubId);
     expect(snapshot.contract.clubId, offers.first.clubId);
-    for (final nation in FootballNation.values) {
-      final world = buildLaunchWorld();
+    final world = buildLaunchWorld();
+    for (final country
+        in world.countries.where((country) => country.hasLeague)) {
       final first = world.leagues.firstWhere(
         (league) =>
-            league.nation == nation && league.division == DivisionLevel.first,
+            league.countryId == country.id &&
+            league.division == DivisionLevel.first,
       );
       expect(
         before[first.id]!
@@ -255,9 +364,224 @@ void main() {
       );
     }
     final report = engine.transferMarketReport(base);
-    expect(report, hasLength(119));
+    expect(report, hasLength(519));
     expect(report.every((entry) => entry.reason.isNotEmpty), isTrue);
     expect(report.where((entry) => !entry.accepted), isNotEmpty);
+  });
+
+  test('transfer requests persist and charge manager trust once per season',
+      () {
+    final initial = CareerSnapshot.newCareer(seed: 881);
+    final targetLeague = buildLaunchWorld().leagues.firstWhere(
+          (league) =>
+              league.id != initial.world.leagueIdForClub(initial.clubId),
+        );
+    final preferredClubId =
+        initial.world.leagueParticipants[targetLeague.id]!.first;
+    final filed = engine.fileTransferRequest(
+      snapshot: initial,
+      targetLeagueId: targetLeague.id,
+      preferredClubId: preferredClubId,
+      updatedAt: initial.updatedAt.add(const Duration(minutes: 1)),
+    );
+    expect(
+      filed.player.managerTrust,
+      initial.player.managerTrust -
+          CareerEngine.transferRequestManagerTrustPenalty,
+    );
+    expect(filed.transferRequest?.preferredClubId, preferredClubId);
+    expect(filed.transferRequestTrustPenaltySeason, initial.season);
+    final edited = engine.fileTransferRequest(
+      snapshot: filed,
+      targetLeagueId: targetLeague.id,
+      updatedAt: filed.updatedAt.add(const Duration(minutes: 1)),
+    );
+    expect(edited.player.managerTrust, filed.player.managerTrust);
+    final cancelled = engine.cancelTransferRequest(
+      snapshot: edited,
+      updatedAt: edited.updatedAt.add(const Duration(minutes: 1)),
+    );
+    expect(cancelled.transferRequest, isNull);
+    expect(cancelled.player.managerTrust, filed.player.managerTrust);
+    final refiled = engine.fileTransferRequest(
+      snapshot: cancelled,
+      targetLeagueId: targetLeague.id,
+      preferredClubId: preferredClubId,
+      updatedAt: cancelled.updatedAt.add(const Duration(minutes: 1)),
+    );
+    expect(refiled.player.managerTrust, filed.player.managerTrust);
+    expect(
+      CareerSnapshot.decode(refiled.encode()).transferRequest?.toJson(),
+      refiled.transferRequest?.toJson(),
+    );
+  });
+
+  test('transfer requests validate the target league and preferred club', () {
+    final snapshot = CareerSnapshot.newCareer();
+    expect(
+      () => engine.fileTransferRequest(
+        snapshot: snapshot,
+        targetLeagueId: 'missing-league',
+        updatedAt: snapshot.updatedAt,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => engine.fileTransferRequest(
+        snapshot: snapshot,
+        targetLeagueId: snapshot.world.leagueIdForClub(snapshot.clubId),
+        preferredClubId: snapshot.clubId,
+        updatedAt: snapshot.updatedAt,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => engine.fileTransferRequest(
+        snapshot: snapshot,
+        targetLeagueId: snapshot.world.leagueIdForClub(snapshot.clubId),
+        preferredClubId: 'missing-club',
+        updatedAt: snapshot.updatedAt,
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => engine.fileTransferRequest(
+        snapshot: snapshot.copyWith(
+          retired: true,
+          phase: CareerPhase.retired,
+        ),
+        targetLeagueId: snapshot.world.leagueParticipants.keys.first,
+        updatedAt: snapshot.updatedAt,
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => engine.cancelTransferRequest(
+        snapshot: snapshot.copyWith(
+          retired: true,
+          phase: CareerPhase.retired,
+          transferRequest: TransferRequest(
+            targetLeagueId: snapshot.world.leagueIdForClub(snapshot.clubId),
+            filedSeason: snapshot.season,
+            filedWeek: snapshot.week,
+          ),
+        ),
+        updatedAt: snapshot.updatedAt,
+      ),
+      throwsStateError,
+    );
+  });
+
+  test('a realistic requested league and club lead the offseason offers', () {
+    var snapshot = playSeason(
+      CareerSnapshot.newCareer(seed: 551).copyWith(
+        player: CareerSnapshot.newCareer().player.copyWith(
+              attributes: PlayerAttributes({
+                for (final attribute in PlayerAttribute.values) attribute: 82,
+              }),
+              reputation: 80,
+            ),
+      ),
+    );
+    final world = buildLaunchWorld();
+    final nextWorld = worldSimulator.beginNextSeason(
+      snapshot.world,
+      snapshot.seed,
+      definition: world,
+    );
+    final targetLeague = world.leagues.firstWhere(
+      (league) => league.id != nextWorld.leagueIdForClub(snapshot.clubId),
+    );
+    final preferredClubId = nextWorld.leagueParticipants[targetLeague.id]!
+        .firstWhere((clubId) => clubId != snapshot.clubId);
+    snapshot = engine.fileTransferRequest(
+      snapshot: snapshot,
+      targetLeagueId: targetLeague.id,
+      preferredClubId: preferredClubId,
+      updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+      definition: world,
+    );
+    final offers = engine.contractOffers(snapshot, definition: world);
+    expect(offers, isNotEmpty);
+    expect(offers.first.clubId, preferredClubId);
+    expect(
+      nextWorld.leagueParticipants[targetLeague.id],
+      contains(offers.first.clubId),
+    );
+    expect(
+      engine
+          .contractOffers(snapshot, definition: world)
+          .map((offer) => offer.clubId),
+      offers.map((offer) => offer.clubId),
+    );
+  });
+
+  test('cancelled requests retain the no-request offer ordering', () {
+    final base = CareerSnapshot.newCareer(seed: 6671);
+    final baseline = engine.contractOffers(base);
+    final targetLeagueId = base.world.leagueParticipants.keys.firstWhere(
+      (leagueId) => leagueId != base.world.leagueIdForClub(base.clubId),
+    );
+    final filed = engine.fileTransferRequest(
+      snapshot: base,
+      targetLeagueId: targetLeagueId,
+      updatedAt: base.updatedAt.add(const Duration(minutes: 1)),
+    );
+    final cancelled = engine.cancelTransferRequest(
+      snapshot: filed,
+      updatedAt: filed.updatedAt.add(const Duration(minutes: 1)),
+    );
+
+    expect(
+      engine.contractOffers(cancelled).map(
+            (offer) => (
+              offer.clubId,
+              offer.seasons,
+              offer.weeklyWage,
+              offer.appearanceBonus,
+              offer.promisedRole,
+              offer.tacticalFit,
+              offer.interestReason,
+            ),
+          ),
+      baseline.map(
+        (offer) => (
+          offer.clubId,
+          offer.seasons,
+          offer.weeklyWage,
+          offer.appearanceBonus,
+          offer.promisedRole,
+          offer.tacticalFit,
+          offer.interestReason,
+        ),
+      ),
+    );
+  });
+
+  test('completing the offseason clears transfer-request state', () {
+    var snapshot = playSeason(CareerSnapshot.newCareer(seed: 7701));
+    final world = buildLaunchWorld();
+    final nextWorld = worldSimulator.beginNextSeason(
+      snapshot.world,
+      snapshot.seed,
+      definition: world,
+    );
+    final targetLeagueId = nextWorld.leagueParticipants.keys.firstWhere(
+      (leagueId) => leagueId != nextWorld.leagueIdForClub(snapshot.clubId),
+    );
+    snapshot = engine.fileTransferRequest(
+      snapshot: snapshot,
+      targetLeagueId: targetLeagueId,
+      updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+      definition: world,
+    );
+    final next = engine.completeOffseason(
+      snapshot,
+      updatedAt: snapshot.updatedAt.add(const Duration(days: 21)),
+      definition: world,
+    );
+    expect(next.transferRequest, isNull);
+    expect(next.transferRequestTrustPenaltySeason, isNull);
   });
 
   test('career completes exactly 20 seasons and produces a legacy verdict', () {
@@ -297,12 +621,12 @@ void main() {
       expect(international?.winnerId, isNotNull);
       if (season == 4) {
         final national =
-            snapshot.world.competitions['major-national-tournament'];
+            snapshot.world.competitions['world-nations-championship'];
         expect(national?.winnerId, isNotNull);
         expect(
           CareerSnapshot.decode(snapshot.encode())
               .world
-              .competitions['major-national-tournament']
+              .competitions['world-nations-championship']
               ?.winnerId,
           national?.winnerId,
         );

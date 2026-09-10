@@ -1,5 +1,6 @@
 import '../world/world_models.dart';
 import 'career_snapshot.dart';
+import 'career_types.dart';
 import 'enums.dart';
 
 final class WeeklyChoice {
@@ -98,6 +99,31 @@ final class StatDeltas {
   final int assists;
 }
 
+/// Match-level evidence used by reports, news, and future tactical systems.
+final class MatchMetrics {
+  const MatchMetrics({
+    required this.possession,
+    required this.shots,
+    required this.shotsOnTarget,
+    required this.expectedGoals,
+    required this.opponentExpectedGoals,
+    required this.bigChances,
+    required this.momentumSwings,
+    required this.lateDrama,
+    required this.comeback,
+  });
+
+  final int possession;
+  final int shots;
+  final int shotsOnTarget;
+  final double expectedGoals;
+  final double opponentExpectedGoals;
+  final int bigChances;
+  final int momentumSwings;
+  final bool lateDrama;
+  final bool comeback;
+}
+
 final class WeeklyResult {
   const WeeklyResult({
     required this.snapshot,
@@ -112,11 +138,21 @@ final class WeeklyResult {
     required this.deltas,
     required this.factors,
     required this.headline,
+    required this.matchReport,
+    required this.metrics,
+    required this.newsStories,
     required this.offPitchTitle,
     required this.offPitchBody,
     required this.sponsorPayout,
     required this.endedSponsorIds,
     required this.fixtureDecision,
+    required this.trainedAttribute,
+    required this.developmentGain,
+    required this.developmentRemainder,
+    required this.developmentMultiplier,
+    required this.moneyMultiplier,
+    required this.agentFee,
+    required this.agentReleased,
   });
 
   final CareerSnapshot snapshot;
@@ -131,9 +167,19 @@ final class WeeklyResult {
   final StatDeltas deltas;
   final List<OutcomeFactor> factors;
   final String headline;
+  final String matchReport;
+  final MatchMetrics metrics;
+  final List<CareerNewsItem> newsStories;
   final String offPitchTitle;
   final String offPitchBody;
   final int sponsorPayout;
   final List<String> endedSponsorIds;
   final FixtureDecision fixtureDecision;
+  final PlayerAttribute trainedAttribute;
+  final int developmentGain;
+  final double developmentRemainder;
+  final double developmentMultiplier;
+  final double moneyMultiplier;
+  final int agentFee;
+  final bool agentReleased;
 }

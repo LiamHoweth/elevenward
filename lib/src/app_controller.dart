@@ -8,13 +8,17 @@ import 'services/api_models.dart';
 import 'services/auth_service.dart';
 import 'services/content_service.dart';
 import 'services/entitlement_service.dart';
+import 'services/review_prompt_service.dart';
 import 'services/sync_service.dart';
 import 'storage/career_store.dart';
+import 'ui_copy.dart';
 import 'util/uuid.dart';
 
-enum AppStage { booting, onboarding, careerSlots, playing }
+enum AppStage { booting, languageSelection, onboarding, careerSlots, playing }
 
 enum SyncUiStatus { idle, running, complete, failed }
+
+enum PurchaseUiOutcome { purchased, cancelled, failed, restored }
 
 final class AppController extends ChangeNotifier {
   AppController({
@@ -24,6 +28,7 @@ final class AppController extends ChangeNotifier {
     required this.sync,
     required this.analytics,
     required this.content,
+    this.reviewPrompts,
   });
 
   final CareerStore store;
@@ -32,6 +37,7 @@ final class AppController extends ChangeNotifier {
   final SyncService sync;
   final AnalyticsService analytics;
   final ContentService content;
+  final ReviewPromptService? reviewPrompts;
 
   AppStage stage = AppStage.booting;
   List<SavedCareerSlot> slots = const [];
@@ -48,11 +54,15 @@ final class AppController extends ChangeNotifier {
   String avatarId = 'initials';
   String archiveLayoutId = 'timeline';
   String shareCardStyleId = 'classic';
+  PlayerAttribute activeWeeklyFocus = PlayerAttribute.finishing;
   bool busy = false;
+  GamePassId? processingPass;
+  PurchaseUiOutcome? lastPurchaseOutcome;
   String? lastMessage;
   SyncUiStatus syncStatus = SyncUiStatus.idle;
   SyncProgressUpdate? syncProgress;
   SyncReport? lastSyncReport;
+  bool _onboardingCompleted = false;
 
   Future<void> initialize() async {
     try {
@@ -82,9 +92,13 @@ final class AppController extends ChangeNotifier {
       leaderboardOptIn = await store.getPreference('leaderboard.optIn') == true;
       unawaited(analytics.record('app_started'));
       await refreshSlots();
-      final completedOnboarding =
+      _onboardingCompleted =
           await store.getPreference('onboarding.completed') == true;
-      stage = completedOnboarding ? AppStage.careerSlots : AppStage.onboarding;
+      final languageSelected =
+          await store.getPreference('language.selected') == true;
+      stage = languageSelected
+          ? (_onboardingCompleted ? AppStage.careerSlots : AppStage.onboarding)
+          : AppStage.languageSelection;
       notifyListeners();
       unawaited(_restoreOnlineServices());
     } on Object {
@@ -125,7 +139,20 @@ final class AppController extends ChangeNotifier {
 
   Future<void> completeOnboarding() async {
     await store.setPreference('onboarding.completed', true);
+    _onboardingCompleted = true;
     stage = AppStage.careerSlots;
+    notifyListeners();
+  }
+
+  /// Records the explicit first-launch language choice before onboarding.
+  Future<void> selectInitialLanguage(Locale value) async {
+    locale = value;
+    await store.setPreference(
+      'locale',
+      [value.languageCode, value.countryCode].whereType<String>().join('-'),
+    );
+    await store.setPreference('language.selected', true);
+    stage = _onboardingCompleted ? AppStage.careerSlots : AppStage.onboarding;
     notifyListeners();
   }
 
@@ -142,6 +169,7 @@ final class AppController extends ChangeNotifier {
       }
       activeSlotIndex = index;
       activeCareer = snapshot;
+      activeWeeklyFocus = await _loadWeeklyFocus(snapshot.careerId);
       activeContent = pinnedContent;
       lastMessage = store.consumeRecoveryNotice();
       stage = AppStage.playing;
@@ -154,12 +182,18 @@ final class AppController extends ChangeNotifier {
 
   Future<void> createCareer({
     required int slotIndex,
-    required String playerName,
+    required String firstName,
+    required String lastName,
     required Archetype archetype,
     required String nationalTeamId,
     required ClubDefinition club,
     required Difficulty difficulty,
   }) async {
+    final normalizedFirstName = _normalizeNamePart(firstName);
+    final normalizedLastName = _normalizeNamePart(lastName);
+    if (normalizedFirstName.isEmpty || normalizedLastName.isEmpty) {
+      throw ArgumentError('Both first name and last name are required.');
+    }
     final selectedContent = availableContent ?? activeContent;
     final careerId = generateUuidV4();
     final snapshot = CareerSnapshot.newCareer(
@@ -171,9 +205,10 @@ final class AppController extends ChangeNotifier {
       contentVersion:
           selectedContent?.version ?? buildLaunchWorld().contentVersion,
       difficulty: difficulty,
+      worldDefinition: selectedContent?.catalog.world ?? buildLaunchWorld(),
       player: PlayerState.newCareer(
         id: generateUuidV4(),
-        name: playerName.trim(),
+        name: '$normalizedFirstName $normalizedLastName',
         archetype: archetype,
         nationalTeamId: nationalTeamId,
       ),
@@ -182,6 +217,7 @@ final class AppController extends ChangeNotifier {
     await refreshSlots();
     activeSlotIndex = slotIndex;
     activeCareer = snapshot;
+    activeWeeklyFocus = PlayerAttribute.finishing;
     activeContent = selectedContent;
     stage = AppStage.playing;
     notifyListeners();
@@ -196,6 +232,9 @@ final class AppController extends ChangeNotifier {
     );
   }
 
+  static String _normalizeNamePart(String value) =>
+      value.trim().replaceAll(RegExp(r'\s+'), ' ');
+
   Future<void> saveCareer(
     CareerSnapshot snapshot, {
     String eventType = 'snapshot_saved',
@@ -204,8 +243,10 @@ final class AppController extends ChangeNotifier {
     if (slot == null) throw StateError('No active career slot.');
     final previous = activeCareer;
     await store.saveSlot(slot, snapshot, eventType: eventType);
-    activeCareer = snapshot;
     await refreshSlots();
+    // Publish the new career only once its durable slot list has also been
+    // refreshed. This keeps UI listeners from observing a partly saved state.
+    activeCareer = snapshot;
     notifyListeners();
     final position = snapshot.player.position.name;
     final difficulty = snapshot.difficulty.name;
@@ -264,11 +305,30 @@ final class AppController extends ChangeNotifier {
     }
   }
 
+  Future<void> requestReviewAfterSeason(CareerSnapshot snapshot) async {
+    await reviewPrompts?.requestAfterSeason(snapshot);
+  }
+
   Future<void> deleteSlot(int index) async {
+    final careerId = activeSlotIndex == index
+        ? activeCareer?.careerId
+        : slots
+              .where((slot) => slot.slotIndex == index)
+              .firstOrNull
+              ?.snapshot
+              ?.careerId;
     await store.deleteSlot(index, DateTime.now().toUtc());
+    if (careerId != null) {
+      try {
+        await store.removeWeeklyFocus(careerId);
+      } on Object {
+        lastMessage = uiCopy(_copyLocale, 'focusClearFailed');
+      }
+    }
     if (activeSlotIndex == index) {
       activeSlotIndex = null;
       activeCareer = null;
+      activeWeeklyFocus = PlayerAttribute.finishing;
       activeContent = availableContent;
       stage = AppStage.careerSlots;
     }
@@ -278,6 +338,7 @@ final class AppController extends ChangeNotifier {
   void showCareerSlots() {
     activeSlotIndex = null;
     activeCareer = null;
+    activeWeeklyFocus = PlayerAttribute.finishing;
     activeContent = availableContent;
     stage = AppStage.careerSlots;
     notifyListeners();
@@ -309,6 +370,45 @@ final class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> changeWeeklyFocus(PlayerAttribute value) async {
+    final career = activeCareer;
+    if (career == null) return;
+    activeWeeklyFocus = value;
+    notifyListeners();
+    try {
+      await store.saveWeeklyFocus(career.careerId, value);
+    } on Object {
+      lastMessage = uiCopy(_copyLocale, 'focusSaveFailed');
+      notifyListeners();
+    }
+  }
+
+  Future<void> fileTransferRequest({
+    required String targetLeagueId,
+    String? preferredClubId,
+  }) async {
+    final career = activeCareer;
+    if (career == null) return;
+    final next = const CareerEngine().fileTransferRequest(
+      snapshot: career,
+      targetLeagueId: targetLeagueId,
+      preferredClubId: preferredClubId,
+      updatedAt: DateTime.now().toUtc(),
+      definition: activeContent?.catalog.world,
+    );
+    await saveCareer(next, eventType: 'transfer_requested');
+  }
+
+  Future<void> cancelTransferRequest() async {
+    final career = activeCareer;
+    if (career?.transferRequest == null) return;
+    final next = const CareerEngine().cancelTransferRequest(
+      snapshot: career!,
+      updatedAt: DateTime.now().toUtc(),
+    );
+    await saveCareer(next, eventType: 'transfer_request_cancelled');
+  }
+
   Future<void> submitActiveCareerLeaderboard() => _runOnline(() async {
     final career = activeCareer;
     if (career == null || !career.retired) {
@@ -326,27 +426,52 @@ final class AppController extends ChangeNotifier {
     return value is String && value.isNotEmpty ? value : fallback;
   }
 
+  Future<PlayerAttribute> _loadWeeklyFocus(String careerId) async {
+    try {
+      return await store.loadWeeklyFocus(careerId);
+    } on Object {
+      lastMessage = uiCopy(_copyLocale, 'focusLoadFailed');
+      return PlayerAttribute.finishing;
+    }
+  }
+
   Future<void> setCosmeticPreference(String key, String value) async {
     const freeValues = {'pitch', 'initials', 'timeline', 'classic'};
-    if (!entitlementState.supporterPack && !freeValues.contains(value)) {
-      lastMessage = 'The Supporter Pack unlocks this cosmetic.';
+    if (!entitlementState.premiumCosmetics && !freeValues.contains(value)) {
+      lastMessage = uiCopy(_copyLocale, 'premiumCosmeticRequired');
       notifyListeners();
       return;
     }
-    switch (key) {
-      case 'theme':
-        themeId = value;
-      case 'avatar':
-        avatarId = value;
-      case 'archiveLayout':
-        archiveLayoutId = value;
-      case 'shareCard':
-        shareCardStyleId = value;
-      default:
-        throw ArgumentError.value(key, 'key');
+    final previous = switch (key) {
+      'theme' => themeId,
+      'avatar' => avatarId,
+      'archiveLayout' => archiveLayoutId,
+      'shareCard' => shareCardStyleId,
+      _ => throw ArgumentError.value(key, 'key'),
+    };
+    void apply(String selected) {
+      switch (key) {
+        case 'theme':
+          themeId = selected;
+        case 'avatar':
+          avatarId = selected;
+        case 'archiveLayout':
+          archiveLayoutId = selected;
+        case 'shareCard':
+          shareCardStyleId = selected;
+      }
     }
-    await store.setPreference('cosmetic.$key', value);
+
+    apply(value);
+    lastMessage = null;
     notifyListeners();
+    try {
+      await store.setPreference('cosmetic.$key', value);
+    } on Object {
+      apply(previous);
+      lastMessage = uiCopy(_copyLocale, 'cosmeticSaveFailed');
+      notifyListeners();
+    }
   }
 
   Future<void> signInApple() => _runOnline(() async {
@@ -425,6 +550,7 @@ final class AppController extends ChangeNotifier {
       if (resolved == null) {
         activeSlotIndex = null;
         activeCareer = null;
+        activeWeeklyFocus = PlayerAttribute.finishing;
         activeContent = availableContent;
         stage = AppStage.careerSlots;
       } else {
@@ -432,6 +558,7 @@ final class AppController extends ChangeNotifier {
         if (pinned == null) {
           activeSlotIndex = null;
           activeCareer = null;
+          activeWeeklyFocus = PlayerAttribute.finishing;
           activeContent = availableContent;
           stage = AppStage.careerSlots;
           lastMessage =
@@ -439,6 +566,7 @@ final class AppController extends ChangeNotifier {
           return;
         }
         activeCareer = resolved;
+        activeWeeklyFocus = await _loadWeeklyFocus(resolved.careerId);
         activeContent = pinned;
       }
     }
@@ -472,17 +600,59 @@ final class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> purchase(String entitlementId) => _runOnline(() async {
-    entitlementState = await entitlements.purchase(entitlementId);
-    await refreshSlots();
-    lastMessage = 'Purchase restored on this device.';
-  });
+  Future<void> purchase(GamePassId id) async {
+    if (busy) return;
+    busy = true;
+    processingPass = id;
+    lastPurchaseOutcome = null;
+    lastMessage = null;
+    notifyListeners();
+    try {
+      entitlementState = await entitlements.purchase(id);
+      await refreshSlots();
+      lastPurchaseOutcome = PurchaseUiOutcome.purchased;
+    } on PurchaseCancelledException {
+      lastPurchaseOutcome = PurchaseUiOutcome.cancelled;
+    } on Object {
+      lastPurchaseOutcome = PurchaseUiOutcome.failed;
+    } finally {
+      busy = false;
+      processingPass = null;
+      notifyListeners();
+    }
+  }
 
-  Future<void> restorePurchases() => _runOnline(() async {
-    entitlementState = await entitlements.restore();
-    await refreshSlots();
-    lastMessage = 'Purchases restored.';
-  });
+  Future<void> refreshStoreCatalog() async {
+    if (busy) return;
+    busy = true;
+    lastMessage = null;
+    final refresh = entitlements.refreshCatalog();
+    notifyListeners();
+    try {
+      await refresh;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> restorePurchases() async {
+    if (busy) return;
+    busy = true;
+    lastPurchaseOutcome = null;
+    lastMessage = null;
+    notifyListeners();
+    try {
+      entitlementState = await entitlements.restore();
+      await refreshSlots();
+      lastPurchaseOutcome = PurchaseUiOutcome.restored;
+    } on Object {
+      lastPurchaseOutcome = PurchaseUiOutcome.failed;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
 
   Future<void> _runOnline(Future<void> Function() operation) async {
     if (busy) return;
@@ -498,4 +668,7 @@ final class AppController extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  String get _copyLocale =>
+      locale?.languageCode == 'pt' ? 'pt-BR' : locale?.languageCode ?? 'en';
 }

@@ -10,7 +10,7 @@ void main() {
     expect(second.checksum, first.checksum);
     expect(first.positionCounts.keys, hasLength(4));
     expect(first.difficultyCounts.keys, hasLength(3));
-    expect(first.leagueCounts.keys, hasLength(12));
+    expect(first.leagueCounts.keys, hasLength(52));
     expect(first.retirementSeasonCounts.keys, hasLength(5));
     expect(first.weeks, greaterThan(500000));
   });

@@ -1,0 +1,4 @@
+// Public OAuth identifiers required by the iOS bundle. These values identify
+// the app; they are not credentials and are safe to ship in the binary.
+ELEVENWARD_GOOGLE_IOS_CLIENT_ID = 979143231399-2n1795s486jffefho6fjsgebmg105i43.apps.googleusercontent.com
+ELEVENWARD_GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.979143231399-2n1795s486jffefho6fjsgebmg105i43

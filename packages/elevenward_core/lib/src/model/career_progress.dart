@@ -166,9 +166,12 @@ final class CareerWorldState {
     required this.season,
     required this.leagueParticipants,
     required this.leagueRecords,
+    this.playerLeagueFixtures = const [],
     this.domesticCupWinners = const {},
     this.internationalClubWinner,
     this.nationalTournamentWinner,
+    this.nationalQualification,
+    this.nationalTournamentHistory = const [],
     this.competitions = const {},
   });
 
@@ -190,9 +193,9 @@ final class CareerWorldState {
       ),
     };
     if (isMajorNationalTournamentSeason(1)) {
-      final ids = world.nationalTeams.map((team) => team.id).toList();
-      competitions['major-national-tournament'] = CompetitionProgress(
-        id: 'major-national-tournament',
+      final ids = qualifyingNationalTeams(world, 1);
+      competitions['world-nations-championship'] = CompetitionProgress(
+        id: 'world-nations-championship',
         kind: CompetitionKind.nationalTournament,
         participantIds: ids,
         fixtures: buildNationalGroupSchedule(ids),
@@ -240,11 +243,32 @@ final class CareerWorldState {
               ),
           },
       },
+      playerLeagueFixtures:
+          (json['playerLeagueFixtures'] as List<Object?>? ?? const [])
+              .map(
+                (value) => Fixture.fromJson(
+                  (value as Map).cast<String, Object?>(),
+                ),
+              )
+              .toList(growable: false),
       domesticCupWinners:
           (json['domesticCupWinners'] as Map<String, Object?>? ?? const {})
               .map((key, value) => MapEntry(key, value as String)),
       internationalClubWinner: json['internationalClubWinner'] as String?,
       nationalTournamentWinner: json['nationalTournamentWinner'] as String?,
+      nationalQualification: json['nationalQualification'] is Map
+          ? NationalQualificationState.fromJson(
+              (json['nationalQualification'] as Map).cast<String, Object?>(),
+            )
+          : null,
+      nationalTournamentHistory:
+          (json['nationalTournamentHistory'] as List<Object?>? ?? const [])
+              .map(
+                (value) => NationalTournamentHistoryEntry.fromJson(
+                  (value as Map).cast<String, Object?>(),
+                ),
+              )
+              .toList(growable: false),
       competitions:
           (json['competitions'] as Map<String, Object?>? ?? const {}).map(
         (key, value) => MapEntry(
@@ -260,9 +284,12 @@ final class CareerWorldState {
   final int season;
   final Map<String, List<String>> leagueParticipants;
   final Map<String, Map<String, ClubSeasonRecord>> leagueRecords;
+  final List<Fixture> playerLeagueFixtures;
   final Map<String, String> domesticCupWinners;
   final String? internationalClubWinner;
   final String? nationalTournamentWinner;
+  final NationalQualificationState? nationalQualification;
+  final List<NationalTournamentHistoryEntry> nationalTournamentHistory;
   final Map<String, CompetitionProgress> competitions;
 
   String leagueIdForClub(String clubId) => leagueParticipants.entries
@@ -305,22 +332,30 @@ final class CareerWorldState {
     int? season,
     Map<String, List<String>>? leagueParticipants,
     Map<String, Map<String, ClubSeasonRecord>>? leagueRecords,
+    List<Fixture>? playerLeagueFixtures,
     Map<String, String>? domesticCupWinners,
     String? internationalClubWinner,
     String? nationalTournamentWinner,
     bool clearNationalTournamentWinner = false,
+    NationalQualificationState? nationalQualification,
+    List<NationalTournamentHistoryEntry>? nationalTournamentHistory,
     Map<String, CompetitionProgress>? competitions,
   }) =>
       CareerWorldState(
         season: season ?? this.season,
         leagueParticipants: leagueParticipants ?? this.leagueParticipants,
         leagueRecords: leagueRecords ?? this.leagueRecords,
+        playerLeagueFixtures: playerLeagueFixtures ?? this.playerLeagueFixtures,
         domesticCupWinners: domesticCupWinners ?? this.domesticCupWinners,
         internationalClubWinner:
             internationalClubWinner ?? this.internationalClubWinner,
         nationalTournamentWinner: clearNationalTournamentWinner
             ? null
             : nationalTournamentWinner ?? this.nationalTournamentWinner,
+        nationalQualification:
+            nationalQualification ?? this.nationalQualification,
+        nationalTournamentHistory:
+            nationalTournamentHistory ?? this.nationalTournamentHistory,
         competitions: competitions ?? this.competitions,
       );
 
@@ -334,12 +369,113 @@ final class CareerWorldState {
                 club.key: club.value.toJson(),
             },
         },
+        'playerLeagueFixtures':
+            playerLeagueFixtures.map((fixture) => fixture.toJson()).toList(),
         'domesticCupWinners': domesticCupWinners,
         'internationalClubWinner': internationalClubWinner,
         'nationalTournamentWinner': nationalTournamentWinner,
+        'nationalQualification': nationalQualification?.toJson(),
+        'nationalTournamentHistory': nationalTournamentHistory
+            .map((entry) => entry.toJson())
+            .toList(growable: false),
         'competitions': {
           for (final entry in competitions.entries)
             entry.key: entry.value.toJson(),
         },
+      };
+}
+
+final class NationalQualificationState {
+  const NationalQualificationState({
+    required this.cycleSeason,
+    required this.tables,
+    required this.fixtures,
+    required this.qualifiedTeamIds,
+  });
+
+  factory NationalQualificationState.fromJson(Map<String, Object?> json) =>
+      NationalQualificationState(
+        cycleSeason: json['cycleSeason'] as int,
+        tables: (json['tables'] as Map<String, Object?>).map(
+          (key, value) => MapEntry(
+            key,
+            (value as List<Object?>)
+                .map(
+                  (row) => StandingRow.fromJson(
+                    (row as Map).cast<String, Object?>(),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+        fixtures: (json['fixtures'] as Map<String, Object?>).map(
+          (key, value) => MapEntry(
+            key,
+            (value as List<Object?>)
+                .map(
+                  (fixture) => Fixture.fromJson(
+                    (fixture as Map).cast<String, Object?>(),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+        qualifiedTeamIds:
+            (json['qualifiedTeamIds'] as List<Object?>).cast<String>(),
+      );
+
+  final int cycleSeason;
+  final Map<String, List<StandingRow>> tables;
+  final Map<String, List<Fixture>> fixtures;
+  final List<String> qualifiedTeamIds;
+
+  bool qualified(String teamId) => qualifiedTeamIds.contains(teamId);
+
+  Map<String, Object?> toJson() => {
+        'cycleSeason': cycleSeason,
+        'tables': {
+          for (final entry in tables.entries)
+            entry.key: entry.value.map((row) => row.toJson()).toList(),
+        },
+        'fixtures': {
+          for (final entry in fixtures.entries)
+            entry.key: entry.value.map((fixture) => fixture.toJson()).toList(),
+        },
+        'qualifiedTeamIds': qualifiedTeamIds,
+      };
+}
+
+final class NationalTournamentHistoryEntry {
+  const NationalTournamentHistoryEntry({
+    required this.season,
+    required this.winnerId,
+    required this.playerTeamId,
+    required this.playerFinish,
+    required this.playerAppearances,
+  });
+
+  factory NationalTournamentHistoryEntry.fromJson(
+    Map<String, Object?> json,
+  ) =>
+      NationalTournamentHistoryEntry(
+        season: json['season'] as int,
+        winnerId: json['winnerId'] as String,
+        playerTeamId: json['playerTeamId'] as String,
+        playerFinish: json['playerFinish'] as String,
+        playerAppearances: json['playerAppearances'] as int? ?? 0,
+      );
+
+  final int season;
+  final String winnerId;
+  final String playerTeamId;
+  final String playerFinish;
+  final int playerAppearances;
+
+  Map<String, Object?> toJson() => {
+        'season': season,
+        'winnerId': winnerId,
+        'playerTeamId': playerTeamId,
+        'playerFinish': playerFinish,
+        'playerAppearances': playerAppearances,
       };
 }

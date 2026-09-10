@@ -493,6 +493,24 @@ final class CareerStore {
     return rows.isEmpty ? null : jsonDecode(rows.first['value_json'] as String);
   }
 
+  Future<void> removePreference(String key) =>
+      _database.delete('app_preferences', where: 'key = ?', whereArgs: [key]);
+
+  Future<PlayerAttribute> loadWeeklyFocus(String careerId) async {
+    final value = await getPreference(weeklyFocusPreferenceKey(careerId));
+    if (value is! String) return PlayerAttribute.finishing;
+    return PlayerAttribute.values.firstWhere(
+      (attribute) => attribute.name == value,
+      orElse: () => PlayerAttribute.finishing,
+    );
+  }
+
+  Future<void> saveWeeklyFocus(String careerId, PlayerAttribute focus) =>
+      setPreference(weeklyFocusPreferenceKey(careerId), focus.name);
+
+  Future<void> removeWeeklyFocus(String careerId) =>
+      removePreference(weeklyFocusPreferenceKey(careerId));
+
   Future<void> close() => _database.close();
 
   CareerSnapshot _decodeVerified(Map<String, Object?> row) {
@@ -523,3 +541,6 @@ final class CareerStore {
     }
   }
 }
+
+String weeklyFocusPreferenceKey(String careerId) =>
+    'career.$careerId.weeklyFocus';

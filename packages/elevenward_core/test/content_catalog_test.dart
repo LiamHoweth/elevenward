@@ -6,7 +6,7 @@ void main() {
 
   test('launch catalog meets every initial content count', () {
     expect(catalog.matchSituations, hasLength(160));
-    expect(catalog.careerEvents, hasLength(200));
+    expect(catalog.careerEvents, hasLength(100));
     expect(catalog.lifestyleItems, hasLength(120));
     for (final position in PositionFamily.values) {
       expect(

@@ -1,8 +1,10 @@
 import '../content/content_catalog.dart';
+import '../content/content_models.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
 import '../model/enums.dart';
 import '../model/player_state.dart';
+import '../model/reward_modifiers.dart';
 import '../model/weekly_models.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
@@ -24,6 +26,7 @@ final class ProductionCareerVerificationReport {
     required this.transferCounts,
     required this.nationalTeamDecisionCounts,
     required this.leagueMovementCounts,
+    required this.rewardProfileCounts,
     required this.failures,
     required this.checksum,
   });
@@ -40,6 +43,7 @@ final class ProductionCareerVerificationReport {
   final Map<String, int> transferCounts;
   final Map<String, int> nationalTeamDecisionCounts;
   final Map<String, int> leagueMovementCounts;
+  final Map<String, int> rewardProfileCounts;
   final List<String> failures;
   final String checksum;
 
@@ -59,6 +63,7 @@ final class ProductionCareerVerificationReport {
         'transferCounts': transferCounts,
         'nationalTeamDecisionCounts': nationalTeamDecisionCounts,
         'leagueMovementCounts': leagueMovementCounts,
+        'rewardProfileCounts': rewardProfileCounts,
         'failures': failures,
         'checksum': checksum,
         'passed': passed,
@@ -107,6 +112,12 @@ final class ProductionCareerVerifier {
       'relegated': 0,
       'unchanged': 0,
     };
+    final rewardProfiles = <String, int>{
+      'standard': 0,
+      'vip': 0,
+      'double': 0,
+      'allAccess': 0,
+    };
     final failures = <String>[];
     var weeks = 0;
     var checksum = 0x811c9dc5;
@@ -116,12 +127,40 @@ final class ProductionCareerVerifier {
       final archetype = Archetype.values[index % Archetype.values.length];
       final difficulty =
           Difficulty.values[(index ~/ Archetype.values.length) % 3];
-      final club = world.clubs[(index ~/ 36) % world.clubs.length];
-      final league = world.leagues.firstWhere(
-        (item) => item.clubIds.contains(club.id),
+      final league = world.leagues[index % world.leagues.length];
+      final club = world.club(
+        league.clubIds[(index ~/ world.leagues.length) % league.clubIds.length],
       );
-      final targetRetirementSeason = 16 + ((index ~/ 4320) % 5);
+      final targetRetirementSeason = 16 + (index % 5);
       final transferMode = index % 3;
+      final (rewardProfile, modifiers) = switch (index % 4) {
+        0 => ('standard', RewardModifiers.standard),
+        1 => (
+            'vip',
+            const RewardModifiers(
+              developmentMultiplier: 1.5,
+              moneyMultiplier: 1.5,
+              sourceIds: ['vip'],
+            ),
+          ),
+        2 => (
+            'double',
+            const RewardModifiers(
+              developmentMultiplier: 2,
+              moneyMultiplier: 2,
+              sourceIds: ['doubleDevelopment', 'doubleMoney'],
+            ),
+          ),
+        _ => (
+            'allAccess',
+            const RewardModifiers(
+              developmentMultiplier: 3,
+              moneyMultiplier: 3,
+              sourceIds: ['allAccess'],
+            ),
+          ),
+      };
+      rewardProfiles[rewardProfile] = rewardProfiles[rewardProfile]! + 1;
       positions.update(
         archetype.positionFamily.name,
         (value) => value + 1,
@@ -146,6 +185,7 @@ final class ProductionCareerVerifier {
         clubId: club.id,
         clubName: club.name,
         contentVersion: catalog.version,
+        worldDefinition: world,
         difficulty: difficulty,
         player: PlayerState.newCareer(
           id: 'player-$index',
@@ -158,17 +198,22 @@ final class ProductionCareerVerifier {
       final startingClub = snapshot.clubId;
       try {
         while (!snapshot.retired) {
-          while (snapshot.phase == CareerPhase.inSeason) {
-            if (_engine.hasNationalTeamInvitation(snapshot)) {
+          while (snapshot.phase == CareerPhase.inSeason ||
+              snapshot.phase == CareerPhase.internationalCallup ||
+              snapshot.phase == CareerPhase.internationalTournament) {
+            if (snapshot.phase == CareerPhase.internationalCallup) {
               final decision = index.isEven ? 'accepted' : 'declined';
               snapshot = _engine.decideNationalTeamCallUp(
                 snapshot: snapshot,
                 accept: index.isEven,
                 updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+                definition: world,
               );
               nationalTeamDecisions[decision] =
                   nationalTeamDecisions[decision]! + 1;
+              if (snapshot.phase == CareerPhase.offseason) break;
             }
+            final wasClubSeason = snapshot.phase == CareerPhase.inSeason;
             final opponent = _world.opponentFor(snapshot, definition: world);
             final situations = catalog.matchSituations
                 .where((item) => item.position == snapshot.player.position)
@@ -194,9 +239,14 @@ final class ProductionCareerVerifier {
                   opponent: opponent,
                   situationOption: option,
                   updatedAt: snapshot.updatedAt.add(const Duration(days: 7)),
+                  modifiers: modifiers,
+                  definition: world,
                 )
                 .snapshot;
-            final events = _engine.eligibleEvents(snapshot, catalog);
+            final events =
+                wasClubSeason && snapshot.phase == CareerPhase.inSeason
+                    ? _engine.eligibleEvents(snapshot, catalog)
+                    : const <CareerEventDefinition>[];
             if (events.isEmpty) {
               weeks += 1;
               continue;
@@ -210,6 +260,7 @@ final class ProductionCareerVerifier {
               event: event,
               choice: choice,
               updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+              modifiers: modifiers,
             );
             weeks += 1;
           }
@@ -260,11 +311,12 @@ final class ProductionCareerVerifier {
           if (snapshot.clubId == beforeClub) {
             transfers['stayed'] = transfers['stayed']! + 1;
           } else {
-            final beforeNation =
-                world.clubs.firstWhere((item) => item.id == beforeClub).nation;
+            final beforeNation = world.clubs
+                .firstWhere((item) => item.id == beforeClub)
+                .countryId;
             final afterNation = world.clubs
                 .firstWhere((item) => item.id == snapshot.clubId)
-                .nation;
+                .countryId;
             final key =
                 beforeNation == afterNation ? 'sameNation' : 'international';
             transfers[key] = transfers[key]! + 1;
@@ -304,6 +356,7 @@ final class ProductionCareerVerifier {
       transferCounts: Map.unmodifiable(transfers),
       nationalTeamDecisionCounts: Map.unmodifiable(nationalTeamDecisions),
       leagueMovementCounts: Map.unmodifiable(leagueMovements),
+      rewardProfileCounts: Map.unmodifiable(rewardProfiles),
       failures: List.unmodifiable(failures),
       checksum: checksum.toUnsigned(32).toRadixString(16).padLeft(8, '0'),
     );

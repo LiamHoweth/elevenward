@@ -4,13 +4,15 @@ import 'package:test/test.dart';
 void main() {
   final world = buildLaunchWorld();
 
-  test('launch world has the promised original competition scale', () {
-    expect(world.clubs, hasLength(120));
-    expect(world.clubs.map((club) => club.id).toSet(), hasLength(120));
-    expect(world.leagues, hasLength(12));
-    expect(world.domesticCups, hasLength(6));
-    expect(world.nationalTeams, hasLength(24));
-    expect(world.internationalClubCompetition.participantIds, hasLength(12));
+  test('launch world has the expanded competition scale', () {
+    expect(
+        world.countries.where((country) => country.hasLeague), hasLength(26));
+    expect(world.clubs, hasLength(520));
+    expect(world.clubs.map((club) => club.id).toSet(), hasLength(520));
+    expect(world.leagues, hasLength(52));
+    expect(world.domesticCups, hasLength(26));
+    expect(world.nationalTeams, hasLength(48));
+    expect(world.internationalClubCompetition.participantIds, hasLength(32));
   });
 
   test('every league has ten clubs and an eighteen-match schedule', () {

@@ -36,7 +36,7 @@ Map<String, Object?> _item(LifestyleItemDefinition item) => {
 
 void main(List<String> arguments) {
   final destination = arguments.isEmpty
-      ? 'assets/content/launch-2026.2.0.json'
+      ? 'assets/content/launch-2026.3.0.json'
       : arguments.single;
   final world = buildLaunchWorld();
   final content = buildLaunchContent();
@@ -48,6 +48,7 @@ void main(List<String> arguments) {
       'rulesVersion': CareerSnapshot.currentRulesVersion,
       'generatedAt': '2026-09-03T00:00:00.000Z',
     },
+    'countries': world.countries.map((country) => country.toJson()).toList(),
     'clubs': world.clubs.map(_club).toList(),
     'nationalTeams': world.nationalTeams.map(_nationalTeam).toList(),
     'matchSituations': content.matchSituations.map(_situation).toList(),
@@ -57,7 +58,8 @@ void main(List<String> arguments) {
         .map((league) => {
               'id': league.id,
               'name': league.name,
-              'nation': league.nation.name,
+              'countryId': league.countryId,
+              'systemRank': league.systemRank,
               'division': league.division.name,
               'clubIds': league.clubIds,
             })
@@ -70,6 +72,7 @@ void main(List<String> arguments) {
         .map((cup) => {
               'id': cup.id,
               'name': cup.name,
+              'countryId': cup.countryId,
               'participantIds': cup.participantIds,
               'openingFixtures':
                   cup.fixtures.map((fixture) => fixture.toJson()).toList(),

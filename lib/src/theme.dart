@@ -18,6 +18,22 @@ abstract final class ElevenwardColors {
   static const sky = Color(0xFF75C8E8);
 }
 
+abstract final class ElevenwardSpacing {
+  static const xxs = 4.0;
+  static const xs = 8.0;
+  static const sm = 12.0;
+  static const md = 16.0;
+  static const lg = 24.0;
+  static const xl = 32.0;
+  static const xxl = 48.0;
+}
+
+abstract final class ElevenwardRadii {
+  static const control = 14.0;
+  static const card = 20.0;
+  static const hero = 28.0;
+}
+
 IconData elevenwardAvatarIcon(String avatarId) => switch (avatarId) {
   'captain' => Icons.shield_rounded,
   'creator' => Icons.auto_awesome_rounded,
@@ -109,5 +125,75 @@ ThemeData buildElevenwardTheme([String themeId = 'pitch']) {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
     ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size.fromHeight(52),
+        side: const BorderSide(color: ElevenwardColors.line),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(ElevenwardRadii.control),
+        ),
+      ),
+    ),
+    cardTheme: CardThemeData(
+      color: ElevenwardColors.panel,
+      elevation: 0,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: ElevenwardColors.line),
+        borderRadius: BorderRadius.circular(ElevenwardRadii.card),
+      ),
+    ),
+    navigationBarTheme: const NavigationBarThemeData(
+      height: 72,
+      backgroundColor: ElevenwardColors.deep,
+      indicatorColor: ElevenwardColors.grassDark,
+      labelTextStyle: WidgetStatePropertyAll(
+        TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
+      ),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: ElevenwardColors.panel,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(ElevenwardRadii.control),
+        borderSide: const BorderSide(color: ElevenwardColors.line),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(ElevenwardRadii.control),
+        borderSide: const BorderSide(color: ElevenwardColors.line),
+      ),
+    ),
+  );
+}
+
+final class BroadcastPanel extends StatelessWidget {
+  const BroadcastPanel({
+    super.key,
+    required this.child,
+    this.padding = const EdgeInsets.all(ElevenwardSpacing.md),
+    this.accent,
+  });
+
+  final Widget child;
+  final EdgeInsetsGeometry padding;
+  final Color? accent;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: padding,
+    decoration: BoxDecoration(
+      color: ElevenwardColors.panel.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(ElevenwardRadii.card),
+      border: Border.all(color: accent ?? ElevenwardColors.line),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x66000000),
+          blurRadius: 24,
+          offset: Offset(0, 12),
+        ),
+      ],
+    ),
+    child: child,
   );
 }

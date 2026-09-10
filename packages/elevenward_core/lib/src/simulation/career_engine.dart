@@ -3,6 +3,7 @@ import '../model/career_lifecycle.dart';
 import '../model/career_progress.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
+import '../model/reward_modifiers.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
 import 'world_simulator.dart';
@@ -11,6 +12,96 @@ final class CareerEngine {
   const CareerEngine();
 
   static const _worldSimulator = WorldSimulator();
+  static const transferRequestManagerTrustPenalty = 8;
+
+  CareerSnapshot fileTransferRequest({
+    required CareerSnapshot snapshot,
+    required String targetLeagueId,
+    required DateTime updatedAt,
+    String? preferredClubId,
+    WorldDefinition? definition,
+  }) {
+    if (snapshot.retired || snapshot.phase == CareerPhase.retired) {
+      throw StateError('A retired player cannot request a transfer.');
+    }
+    final world = definition ?? buildLaunchWorld();
+    if (!world.leagues.any((league) => league.id == targetLeagueId)) {
+      throw ArgumentError.value(
+        targetLeagueId,
+        'targetLeagueId',
+        'Unknown target league.',
+      );
+    }
+    if (preferredClubId == snapshot.clubId) {
+      throw ArgumentError.value(
+        preferredClubId,
+        'preferredClubId',
+        'The current club cannot be the preferred destination.',
+      );
+    }
+    if (preferredClubId != null &&
+        !world.clubs.any((club) => club.id == preferredClubId)) {
+      throw ArgumentError.value(
+        preferredClubId,
+        'preferredClubId',
+        'Unknown preferred club.',
+      );
+    }
+    final marketState = _transferMarketState(snapshot, world);
+    final targetClubs = marketState.leagueParticipants[targetLeagueId];
+    if (targetClubs == null) {
+      throw ArgumentError.value(
+        targetLeagueId,
+        'targetLeagueId',
+        'The target league is not active in this career.',
+      );
+    }
+    if (preferredClubId != null && !targetClubs.contains(preferredClubId)) {
+      throw ArgumentError.value(
+        preferredClubId,
+        'preferredClubId',
+        'The preferred club is not in the target league.',
+      );
+    }
+    final penaltyAlreadyApplied =
+        snapshot.transferRequestTrustPenaltySeason == snapshot.season;
+    final player = penaltyAlreadyApplied
+        ? snapshot.player
+        : snapshot.player.copyWith(
+            managerTrust: (snapshot.player.managerTrust -
+                    transferRequestManagerTrustPenalty)
+                .clamp(1, 100),
+          );
+    return snapshot.copyWith(
+      revision: snapshot.revision + 1,
+      updatedAt: updatedAt.toUtc(),
+      player: player,
+      transferRequest: TransferRequest(
+        targetLeagueId: targetLeagueId,
+        preferredClubId: preferredClubId,
+        filedSeason: snapshot.season,
+        filedWeek: snapshot.week,
+      ),
+      transferRequestTrustPenaltySeason: snapshot.season,
+    );
+  }
+
+  CareerSnapshot cancelTransferRequest({
+    required CareerSnapshot snapshot,
+    required DateTime updatedAt,
+  }) {
+    if (snapshot.retired || snapshot.phase == CareerPhase.retired) {
+      throw StateError('A retired player cannot edit a transfer request.');
+    }
+    if (snapshot.transferRequest == null) {
+      throw StateError('There is no active transfer request.');
+    }
+    return snapshot.copyWith(
+      revision: snapshot.revision + 1,
+      updatedAt: updatedAt.toUtc(),
+      clearTransferRequest: true,
+    );
+  }
 
   List<ContractOffer> contractOffers(
     CareerSnapshot snapshot, {
@@ -24,21 +115,33 @@ final class CareerEngine {
         final comparison = rightInterest.compareTo(leftInterest);
         return comparison != 0 ? comparison : left.id.compareTo(right.id);
       });
-    final standardCandidates = clubs
+    final qualifyingCandidates = clubs
         .where((club) => club.id != snapshot.clubId)
         .where((club) => _interest(snapshot, club) >= 42)
-        .take(3)
         .toList(growable: false);
+    final standardCandidates = qualifyingCandidates.take(3).toList(
+          growable: false,
+        );
     final freeAgencyFallback = snapshot.contract.seasonsRemaining <= 1 &&
         renewalOffer(snapshot, definition: world) == null &&
         standardCandidates.isEmpty;
-    final candidates = freeAgencyFallback
+    final fallbackCandidates = freeAgencyFallback
         ? clubs
             .where((club) => club.id != snapshot.clubId)
             .where((club) => club.division == DivisionLevel.second)
             .take(3)
             .toList(growable: false)
         : standardCandidates;
+    final request = snapshot.transferRequest;
+    final candidates = request == null || freeAgencyFallback
+        ? fallbackCandidates
+        : _requestedTransferCandidates(
+            snapshot: snapshot,
+            world: world,
+            request: request,
+            qualifyingCandidates: qualifyingCandidates,
+            fallbackCandidates: fallbackCandidates,
+          );
     return candidates.map((club) {
       final fit = _tacticalFit(snapshot, club);
       final interest = _interest(snapshot, club);
@@ -70,6 +173,53 @@ final class CareerEngine {
       );
     }).toList(growable: false);
   }
+
+  List<ClubDefinition> _requestedTransferCandidates({
+    required CareerSnapshot snapshot,
+    required WorldDefinition world,
+    required TransferRequest request,
+    required List<ClubDefinition> qualifyingCandidates,
+    required List<ClubDefinition> fallbackCandidates,
+  }) {
+    final marketState = _transferMarketState(snapshot, world);
+    final targetIds = marketState.leagueParticipants[request.targetLeagueId];
+    if (targetIds == null) return fallbackCandidates;
+    final targetSet = targetIds.toSet();
+    final targetCandidates = qualifyingCandidates
+        .where((club) => targetSet.contains(club.id))
+        .toList(growable: true);
+    if (targetCandidates.isEmpty) return fallbackCandidates;
+
+    final preferredId = request.preferredClubId;
+    if (preferredId != null && targetSet.contains(preferredId)) {
+      final preferredIndex = targetCandidates.indexWhere(
+        (club) => club.id == preferredId,
+      );
+      if (preferredIndex > 0) {
+        final preferred = targetCandidates.removeAt(preferredIndex);
+        targetCandidates.insert(0, preferred);
+      }
+    }
+    final result = <ClubDefinition>[];
+    for (final club in [...targetCandidates, ...qualifyingCandidates]) {
+      if (result.any((candidate) => candidate.id == club.id)) continue;
+      result.add(club);
+      if (result.length == 3) break;
+    }
+    return List.unmodifiable(result);
+  }
+
+  CareerWorldState _transferMarketState(
+    CareerSnapshot snapshot,
+    WorldDefinition world,
+  ) =>
+      snapshot.phase == CareerPhase.offseason
+          ? _worldSimulator.beginNextSeason(
+              snapshot.world,
+              snapshot.seed,
+              definition: world,
+            )
+          : snapshot.world;
 
   ContractOffer? renewalOffer(
     CareerSnapshot snapshot, {
@@ -222,7 +372,10 @@ final class CareerEngine {
           !mustRetire(withHistory)) {
         throw StateError('Retirement is not available yet.');
       }
-      return retireCareer(withHistory, updatedAt.toUtc());
+      return retireCareer(withHistory, updatedAt.toUtc()).copyWith(
+        clearTransferRequest: true,
+        clearTransferRequestTrustPenaltySeason: true,
+      );
     }
 
     final validOffers = contractOffers(withHistory, definition: world);
@@ -290,6 +443,8 @@ final class CareerEngine {
       world: nextWorld,
       seasonPerformance: const SeasonPerformance(),
       contract: contract,
+      clearTransferRequest: true,
+      clearTransferRequestTrustPenaltySeason: true,
     );
   }
 
@@ -298,6 +453,7 @@ final class CareerEngine {
     required CareerEventDefinition event,
     required EventChoiceDefinition choice,
     required DateTime updatedAt,
+    RewardModifiers modifiers = RewardModifiers.standard,
   }) {
     if (!event.choices.any((candidate) => candidate.id == choice.id)) {
       throw ArgumentError('Choice does not belong to this event.');
@@ -327,6 +483,7 @@ final class CareerEngine {
     final startsSponsor = event.category == CareerEventCategory.sponsor &&
         choice.moneyDelta > 0 &&
         !snapshot.sponsorIds.contains(event.id);
+    final appliedMoney = modifiers.applyPositiveMoney(choice.moneyDelta);
     return snapshot.copyWith(
       revision: snapshot.revision + 1,
       updatedAt: updatedAt.toUtc(),
@@ -338,7 +495,7 @@ final class CareerEngine {
             : snapshot.player.managerTrust,
         reputation:
             (snapshot.player.reputation + choice.reputationDelta).clamp(0, 100),
-        money: (snapshot.player.money + choice.moneyDelta).clamp(0, 1 << 52),
+        money: (snapshot.player.money + appliedMoney).clamp(0, 1 << 52),
       ),
       resolvedEventIds: [...snapshot.resolvedEventIds, token],
       sponsorIds: startsSponsor
@@ -355,6 +512,12 @@ final class CareerEngine {
               ),
             ]
           : snapshot.sponsorContracts,
+      boostIdsUsed: {
+        ...snapshot.boostIdsUsed,
+        if (choice.moneyDelta > 0 && modifiers.boostsMoney)
+          ...modifiers.sourceIds,
+      }.toList(growable: false)
+        ..sort(),
     );
   }
 
@@ -473,43 +636,107 @@ final class CareerEngine {
     );
   }
 
-  bool isNationalTeamEligible(CareerSnapshot snapshot) =>
-      snapshot.player.reputation >= 60 && snapshot.player.overall >= 68;
+  NationalCallupRequirements nationalTeamRequirements(
+    CareerSnapshot snapshot, {
+    WorldDefinition? definition,
+  }) {
+    final world = definition ?? buildLaunchWorld();
+    if (world.nationalTeams.length != 48) {
+      return const NationalCallupRequirements(overall: 68, reputation: 60);
+    }
+    return nationalCallupRequirements(world, snapshot.player.nationalTeamId);
+  }
 
-  bool hasNationalTeamInvitation(CareerSnapshot snapshot) {
-    if (snapshot.phase != CareerPhase.inSeason ||
-        !isNationalTeamEligible(snapshot) ||
-        snapshot.nationalTeam.decisionSeason == snapshot.season) {
+  bool isNationalTeamEligible(
+    CareerSnapshot snapshot, {
+    WorldDefinition? definition,
+  }) {
+    final requirements = nationalTeamRequirements(
+      snapshot,
+      definition: definition,
+    );
+    return snapshot.player.reputation >= requirements.reputation &&
+        snapshot.player.overall >= requirements.overall;
+  }
+
+  bool hasNationalTeamInvitation(
+    CareerSnapshot snapshot, {
+    WorldDefinition? definition,
+  }) {
+    final world = definition ?? buildLaunchWorld();
+    if (world.nationalTeams.length != 48) {
+      if (snapshot.phase != CareerPhase.inSeason ||
+          !isNationalTeamEligible(snapshot, definition: world) ||
+          snapshot.nationalTeam.decisionSeason == snapshot.season) {
+        return false;
+      }
+      final tournament =
+          snapshot.world.competitions['major-national-tournament'];
+      return tournament != null &&
+          !tournament.isComplete &&
+          tournament.fixtures.any(
+            (fixture) =>
+                !fixture.isPlayed &&
+                fixture.matchweek >= snapshot.week &&
+                (fixture.homeId == snapshot.player.nationalTeamId ||
+                    fixture.awayId == snapshot.player.nationalTeamId),
+          );
+    }
+    if (snapshot.phase != CareerPhase.internationalCallup ||
+        !isNationalTeamEligible(snapshot, definition: world) ||
+        snapshot.nationalTeam.decision != NationalTeamDecision.undecided) {
       return false;
     }
-    final tournament = snapshot.world.competitions['major-national-tournament'];
+    final tournament =
+        snapshot.world.competitions['world-nations-championship'];
     if (tournament == null || tournament.isComplete) return false;
-    return tournament.fixtures.any(
-      (fixture) =>
-          !fixture.isPlayed &&
-          fixture.matchweek >= snapshot.week &&
-          (fixture.homeId == snapshot.player.nationalTeamId ||
-              fixture.awayId == snapshot.player.nationalTeamId),
-    );
+    return tournament.participantIds.contains(snapshot.player.nationalTeamId);
   }
 
   CareerSnapshot decideNationalTeamCallUp({
     required CareerSnapshot snapshot,
     required bool accept,
     required DateTime updatedAt,
+    WorldDefinition? definition,
   }) {
-    if (!hasNationalTeamInvitation(snapshot)) {
+    final world = definition ?? buildLaunchWorld();
+    if (!hasNationalTeamInvitation(snapshot, definition: world)) {
       throw StateError('There is no active national-team call-up to decide.');
     }
+    final nationalTeam = snapshot.nationalTeam.copyWith(
+      decision: accept
+          ? NationalTeamDecision.accepted
+          : NationalTeamDecision.declined,
+      decisionSeason: snapshot.season,
+      tournamentMatchday: 1,
+      cycleAppearances: 0,
+    );
+    if (world.nationalTeams.length != 48) {
+      return snapshot.copyWith(
+        revision: snapshot.revision + 1,
+        updatedAt: updatedAt.toUtc(),
+        nationalTeam: nationalTeam,
+      );
+    }
+    if (accept) {
+      return snapshot.copyWith(
+        revision: snapshot.revision + 1,
+        updatedAt: updatedAt.toUtc(),
+        phase: CareerPhase.internationalTournament,
+        nationalTeam: nationalTeam,
+      );
+    }
+    final completedWorld = _worldSimulator.completeNationalTournament(
+      snapshot: snapshot.copyWith(nationalTeam: nationalTeam),
+      definition: world,
+      playerFinishOverride: 'declinedCallup',
+    );
     return snapshot.copyWith(
       revision: snapshot.revision + 1,
       updatedAt: updatedAt.toUtc(),
-      nationalTeam: snapshot.nationalTeam.copyWith(
-        decision: accept
-            ? NationalTeamDecision.accepted
-            : NationalTeamDecision.declined,
-        decisionSeason: snapshot.season,
-      ),
+      phase: CareerPhase.offseason,
+      nationalTeam: nationalTeam,
+      world: completedWorld,
     );
   }
 
@@ -529,7 +756,15 @@ final class CareerEngine {
     if (honors.internationalClubWinner == snapshot.clubId) {
       trophies.add(world.internationalClubCompetition.id);
     }
-    if (honors.nationalTournamentWinner == snapshot.player.nationalTeamId &&
+    final championship = honors.nationalTournamentHistory
+        .where((entry) => entry.season == snapshot.season)
+        .firstOrNull;
+    if (championship?.winnerId == snapshot.player.nationalTeamId &&
+        (championship?.playerAppearances ?? 0) > 0) {
+      trophies.add('world-nations-championship');
+    }
+    if (world.nationalTeams.length != 48 &&
+        honors.nationalTournamentWinner == snapshot.player.nationalTeamId &&
         snapshot.nationalTeam.acceptedFor(snapshot.season)) {
       trophies.add('major-national-tournament');
     }
@@ -538,11 +773,10 @@ final class CareerEngine {
 
   int _interest(CareerSnapshot snapshot, ClubDefinition club) {
     final levelFit = 70 - (club.quality - snapshot.player.overall).abs() * 3;
-    final relationshipReach =
-        snapshot.rulesVersion == CareerSnapshot.currentRulesVersion
-            ? snapshot.relationships.agent ~/ 10 +
-                snapshot.relationships.community ~/ 20
-            : 0;
+    final relationshipReach = snapshot.usesExpandedLifeRules
+        ? snapshot.relationships.agent ~/ 10 +
+            snapshot.relationships.community ~/ 20
+        : 0;
     return levelFit +
         snapshot.player.reputation ~/ 3 +
         _tacticalFit(snapshot, club) ~/ 5 +

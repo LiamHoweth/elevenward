@@ -1,11 +1,15 @@
 import '../model/enums.dart';
+import '../world/world_generator.dart';
+import '../world/world_models.dart';
 import 'content_models.dart';
+import 'off_pitch_scenarios.dart';
 
 ContentCatalog buildLaunchContent() => ContentCatalog(
-      version: '2026.2.0',
+      version: launchWorldVersion,
       matchSituations: _buildMatchSituations(),
       careerEvents: _buildCareerEvents(),
       lifestyleItems: _buildLifestyleItems(),
+      world: buildLaunchWorld(),
     );
 
 List<String> validateContentCatalog(ContentCatalog catalog) {
@@ -54,9 +58,20 @@ List<String> validateContentCatalog(ContentCatalog catalog) {
     checkId(event.id, 'event');
     checkText(event.title, '${event.id}.title', unique: true);
     checkText(event.body, '${event.id}.body');
-    if (event.choices.length < 2)
-      errors.add('${event.id} needs at least two choices');
+    final minimumChoices = catalog.version == launchWorldVersion ? 3 : 2;
+    if (event.choices.length < minimumChoices || event.choices.length > 5) {
+      errors.add(
+        '${event.id} needs between $minimumChoices and five choices',
+      );
+    }
+    if (event.previousPerformances.isEmpty) {
+      errors.add('${event.id} needs a previous-match performance trigger');
+    }
+    final choiceIds = <String>{};
     for (final choice in event.choices) {
+      if (!choiceIds.add(choice.id)) {
+        errors.add('${event.id} has duplicate choice id ${choice.id}');
+      }
       checkText(choice.label, '${event.id}.${choice.id}');
     }
   }
@@ -65,6 +80,171 @@ List<String> validateContentCatalog(ContentCatalog catalog) {
     checkText(item.name, '${item.id}.name', unique: true);
     checkText(item.description, '${item.id}.description');
     if (item.price < 0) errors.add('${item.id} has a negative price');
+  }
+  final world = catalog.world;
+  final worldIds = <String>{};
+  for (final country in world.countries) {
+    if (!worldIds.add(country.id)) {
+      errors.add('Duplicate country id: ${country.id}');
+    }
+    for (final locale in supportedLocales) {
+      if ((country.names[locale] ?? '').trim().isEmpty) {
+        errors.add('${country.id} is missing localized name $locale');
+      }
+    }
+    if (country.mapUnitCodes.isEmpty) {
+      errors.add('${country.id} has no map-unit mapping');
+    }
+  }
+  final mapCodes = <String>{};
+  for (final country in world.countries) {
+    for (final code in country.mapUnitCodes) {
+      if (!mapCodes.add(code)) errors.add('Duplicate map-unit code: $code');
+    }
+  }
+  final clubIds = <String>{};
+  for (final club in world.clubs) {
+    if (!clubIds.add(club.id)) errors.add('Duplicate club id: ${club.id}');
+    if (!worldIds.contains(club.countryId)) {
+      errors.add('${club.id} has unknown country ${club.countryId}');
+    }
+  }
+  final leagueIds = <String>{};
+  final fixtureIds = <String>{};
+  void checkFixtures(
+    String competitionId,
+    Iterable<String> participants,
+    List<Fixture> fixtures,
+  ) {
+    final participantIds = participants.toSet();
+    for (final fixture in fixtures) {
+      if (!fixtureIds.add(fixture.id)) {
+        errors.add('Duplicate fixture id: ${fixture.id}');
+      }
+      if (fixture.competitionId != competitionId) {
+        errors.add('${fixture.id} has the wrong competition id');
+      }
+      if (fixture.homeId == fixture.awayId ||
+          !participantIds.contains(fixture.homeId) ||
+          !participantIds.contains(fixture.awayId)) {
+        errors.add('${fixture.id} has invalid participants');
+      }
+      if (fixture.matchweek < 1) {
+        errors.add('${fixture.id} has an invalid matchweek');
+      }
+    }
+  }
+
+  for (final league in world.leagues) {
+    if (!leagueIds.add(league.id)) {
+      errors.add('Duplicate league id: ${league.id}');
+    }
+    if (league.clubIds.length != 10 || league.clubIds.toSet().length != 10) {
+      errors.add('${league.id} must contain 10 unique clubs');
+    }
+    if (league.fixtures.length != 90 || league.matchweeks != 18) {
+      errors.add('${league.id} must contain 90 fixtures over 18 matchweeks');
+    }
+    if (league.clubIds.any((clubId) => !clubIds.contains(clubId))) {
+      errors.add('${league.id} contains an unknown club');
+    }
+    for (final clubId in league.clubIds) {
+      final club = world.clubs.firstWhere((club) => club.id == clubId);
+      if (club.countryId != league.countryId ||
+          club.division != league.division) {
+        errors.add('${league.id} contains a club from the wrong division');
+      }
+      final appearances = league.fixtures.where(
+        (fixture) => fixture.homeId == clubId || fixture.awayId == clubId,
+      );
+      if (appearances.length != 18) {
+        errors.add('$clubId must play 18 league fixtures in ${league.id}');
+      }
+    }
+    checkFixtures(league.id, league.clubIds, league.fixtures);
+  }
+  for (final club in world.clubs) {
+    final memberships = world.leagues.where(
+      (league) => league.clubIds.contains(club.id),
+    );
+    if (memberships.length != 1) {
+      errors.add('${club.id} must belong to exactly one league');
+    }
+  }
+  for (final country in world.countries.where((country) => country.hasLeague)) {
+    final countryLeagues = world.leagues
+        .where((league) => league.countryId == country.id)
+        .toList(growable: false);
+    final divisions = countryLeagues.map((league) => league.division).toSet();
+    if (countryLeagues.length != 2 ||
+        !divisions.containsAll(DivisionLevel.values)) {
+      errors.add('${country.id} needs linked first and second divisions');
+    }
+  }
+  final cupIds = <String>{};
+  for (final cup in world.domesticCups) {
+    if (!cupIds.add(cup.id)) errors.add('Duplicate cup id: ${cup.id}');
+    if (cup.participantIds.length != 20 ||
+        cup.participantIds.toSet().length != 20) {
+      errors.add('${cup.id} must contain 20 unique clubs');
+    }
+    if (cup.kind != CompetitionKind.domesticCup ||
+        cup.countryId == null ||
+        cup.participantIds.any(
+          (clubId) =>
+              !clubIds.contains(clubId) ||
+              world.club(clubId).countryId != cup.countryId,
+        )) {
+      errors.add('${cup.id} has invalid domestic-cup membership');
+    }
+    checkFixtures(cup.id, cup.participantIds, cup.fixtures);
+  }
+  final nationalIds = <String>{};
+  for (final team in world.nationalTeams) {
+    if (!nationalIds.add(team.id)) {
+      errors.add('Duplicate national-team id: ${team.id}');
+    }
+    if (!worldIds.contains(team.countryId) || team.id != team.countryId) {
+      errors.add('${team.id} has an invalid country mapping');
+    }
+  }
+  final international = world.internationalClubCompetition;
+  if (international.participantIds.toSet().length !=
+          international.participantIds.length ||
+      international.participantIds.any((id) => !clubIds.contains(id))) {
+    errors.add('${international.id} has invalid club membership');
+  }
+  checkFixtures(
+    international.id,
+    international.participantIds,
+    international.fixtures,
+  );
+  if (catalog.version == launchWorldVersion) {
+    if (world.nationalTeams.length != 48) {
+      errors.add('Expanded world must contain 48 national teams');
+    }
+    if (world.countries.where((country) => country.hasLeague).length != 26 ||
+        world.leagues.length != 52 ||
+        world.clubs.length != 520 ||
+        world.domesticCups.length != 26) {
+      errors.add('Expanded world catalog counts are invalid');
+    }
+    if (world.internationalClubCompetition.participantIds.length != 32) {
+      errors.add('World Champions Series must contain 32 clubs');
+    }
+    final ranks = world.countries
+        .map((country) => country.leagueRank)
+        .whereType<int>()
+        .toSet();
+    if (ranks.length != 25 ||
+        !ranks.containsAll([for (var rank = 1; rank <= 25; rank++) rank])) {
+      errors.add('IFFHS system ranks must be unique from 1 through 25');
+    }
+    for (final league in world.leagues) {
+      if (league.systemRank != world.country(league.countryId).leagueRank) {
+        errors.add('${league.id} does not match its immutable system rank');
+      }
+    }
   }
   return errors;
 }
@@ -271,323 +451,7 @@ List<SituationOption> _situationOptions(PositionFamily position) {
           ));
 }
 
-List<CareerEventDefinition> _buildCareerEvents() {
-  final events = <CareerEventDefinition>[];
-  for (final category in CareerEventCategory.values) {
-    for (var index = 0; index < 20; index++) {
-      final number = index + 1;
-      events.add(CareerEventDefinition(
-        id: 'career-${category.name}-${number.toString().padLeft(2, '0')}',
-        category: category,
-        title: _eventTitle(category, index),
-        body: _eventBody(category, index),
-        choices: [
-          EventChoiceDefinition(
-            id: 'measured',
-            label: _text('Take the measured path', 'Elegir el camino prudente',
-                'Escolher o caminho equilibrado', 'Choisir la voie mesurée'),
-            trustDelta: category == CareerEventCategory.manager ? 2 : 0,
-            reputationDelta: 1,
-            moneyDelta: 0,
-            wellnessDelta: 1,
-          ),
-          EventChoiceDefinition(
-            id: 'ambitious',
-            label: _text('Back your ambition', 'Apostar por tu ambición',
-                'Apostar na sua ambição', 'Assumer son ambition'),
-            trustDelta: category == CareerEventCategory.manager ? -1 : 0,
-            reputationDelta: 2,
-            moneyDelta: category == CareerEventCategory.sponsor ? 750 : 0,
-            wellnessDelta: -1,
-          ),
-        ],
-      ));
-    }
-  }
-  return List.unmodifiable(events);
-}
-
-LocalizedText _eventTitle(CareerEventCategory category, int index) {
-  final names = switch (category) {
-    CareerEventCategory.manager => [
-        'A word from the manager',
-        'Una charla con el entrenador',
-        'Uma conversa com o treinador',
-        'Un mot de l’entraîneur'
-      ],
-    CareerEventCategory.teammate => [
-        'A teammate needs you',
-        'Un compañero te necesita',
-        'Um companheiro precisa de você',
-        'Un coéquipier a besoin de vous'
-      ],
-    CareerEventCategory.agent => [
-        'Your agent calls',
-        'Tu agente llama',
-        'Seu agente liga',
-        'Votre agent appelle'
-      ],
-    CareerEventCategory.sponsor => [
-        'A brand makes an offer',
-        'Una marca hace una oferta',
-        'Uma marca faz uma proposta',
-        'Une marque fait une offre'
-      ],
-    CareerEventCategory.press => [
-        'The cameras are waiting',
-        'Las cámaras esperan',
-        'As câmeras estão esperando',
-        'Les caméras attendent'
-      ],
-    CareerEventCategory.family => [
-        'News from home',
-        'Noticias de casa',
-        'Notícias de casa',
-        'Des nouvelles de la maison'
-      ],
-    CareerEventCategory.reputation => [
-        'Your name is traveling',
-        'Tu nombre empieza a sonar',
-        'Seu nome está circulando',
-        'Votre nom circule'
-      ],
-    CareerEventCategory.wellness => [
-        'Listen to your body',
-        'Escucha a tu cuerpo',
-        'Escute o seu corpo',
-        'Écoutez votre corps'
-      ],
-    CareerEventCategory.community => [
-        'The neighborhood asks',
-        'El barrio te llama',
-        'A comunidade chama',
-        'Le quartier vous sollicite'
-      ],
-    CareerEventCategory.contract => [
-        'The club opens talks',
-        'El club abre conversaciones',
-        'O clube abre conversas',
-        'Le club ouvre les discussions'
-      ],
-  };
-  const moments = [
-    [
-      'after training',
-      'después del entrenamiento',
-      'depois do treino',
-      'après l’entraînement'
-    ],
-    [
-      'before selection',
-      'antes de la convocatoria',
-      'antes da convocação',
-      'avant la sélection'
-    ],
-    [
-      'on the journey home',
-      'de camino a casa',
-      'no caminho para casa',
-      'sur le chemin du retour'
-    ],
-    [
-      'at the training ground',
-      'en el campo de entrenamiento',
-      'no centro de treinamento',
-      'au centre d’entraînement'
-    ],
-    [
-      'during recovery',
-      'durante la recuperación',
-      'durante a recuperação',
-      'pendant la récupération'
-    ],
-    [
-      'before kickoff',
-      'antes del inicio',
-      'antes do jogo',
-      'avant le coup d’envoi'
-    ],
-    [
-      'after the final whistle',
-      'tras el pitido final',
-      'após o apito final',
-      'après le coup de sifflet'
-    ],
-    [
-      'on a quiet morning',
-      'en una mañana tranquila',
-      'em uma manhã tranquila',
-      'par un matin calme'
-    ],
-    [
-      'during a team meal',
-      'durante una comida de equipo',
-      'durante uma refeição do time',
-      'pendant un repas d’équipe'
-    ],
-    ['between fixtures', 'entre partidos', 'entre jogos', 'entre deux matchs'],
-    [
-      'on your day off',
-      'en tu día libre',
-      'no seu dia de folga',
-      'pendant votre jour de repos'
-    ],
-    [
-      'after a difficult result',
-      'tras un resultado difícil',
-      'após um resultado difícil',
-      'après un résultat difficile'
-    ],
-    [
-      'after a strong performance',
-      'tras una gran actuación',
-      'após uma grande atuação',
-      'après une grande performance'
-    ],
-    [
-      'before the team meeting',
-      'antes de la reunión',
-      'antes da reunião',
-      'avant la réunion d’équipe'
-    ],
-    [
-      'late in the week',
-      'al final de la semana',
-      'no fim da semana',
-      'en fin de semaine'
-    ],
-    [
-      'as attention grows',
-      'mientras crece la atención',
-      'com a atenção crescendo',
-      'alors que l’attention grandit'
-    ],
-    [
-      'during a contract week',
-      'durante una semana de contrato',
-      'durante uma semana de contrato',
-      'pendant une semaine de contrat'
-    ],
-    [
-      'ahead of a derby',
-      'antes de un derbi',
-      'antes de um clássico',
-      'avant un derby'
-    ],
-    [
-      'after a milestone',
-      'tras un hito',
-      'após um marco',
-      'après une étape importante'
-    ],
-    [
-      'before the next chapter',
-      'antes del próximo capítulo',
-      'antes do próximo capítulo',
-      'avant le prochain chapitre'
-    ],
-  ];
-  return LocalizedText({
-    for (var locale = 0; locale < supportedLocales.length; locale++)
-      supportedLocales[locale]: '${names[locale]} ${moments[index][locale]}',
-  });
-}
-
-LocalizedText _eventBody(CareerEventCategory category, int index) {
-  const openings = [
-    [
-      'A quiet decision could shape the weeks ahead.',
-      'Una decisión discreta puede marcar las próximas semanas.',
-      'Uma decisão discreta pode definir as próximas semanas.',
-      'Une décision discrète peut façonner les semaines à venir.'
-    ],
-    [
-      'There is an opportunity, but your time has a cost.',
-      'Hay una oportunidad, pero tu tiempo tiene un coste.',
-      'Há uma oportunidade, mas seu tempo tem um custo.',
-      'Une occasion se présente, mais votre temps a un prix.'
-    ],
-    [
-      'People around the club are watching how you respond.',
-      'En el club observan cómo respondes.',
-      'As pessoas no clube observam como você reage.',
-      'Le club observe votre réaction.'
-    ],
-    [
-      'The easy answer is not necessarily the right one.',
-      'La respuesta fácil no siempre es la correcta.',
-      'A resposta fácil nem sempre é a certa.',
-      'La réponse facile n’est pas toujours la bonne.'
-    ],
-  ];
-  final stakes = switch (category) {
-    CareerEventCategory.manager => [
-        'Your role and the manager’s trust are connected.',
-        'Tu rol y la confianza del entrenador están conectados.',
-        'Seu papel e a confiança do treinador estão ligados.',
-        'Votre rôle et la confiance du coach sont liés.'
-      ],
-    CareerEventCategory.teammate => [
-        'The dressing room will remember whether you made time.',
-        'El vestuario recordará si dedicaste tiempo.',
-        'O vestiário lembrará se você reservou tempo.',
-        'Le vestiaire se souviendra du temps accordé.'
-      ],
-    CareerEventCategory.agent => [
-        'The advice could widen your market or protect your focus.',
-        'El consejo puede ampliar tu mercado o proteger tu concentración.',
-        'O conselho pode ampliar seu mercado ou proteger seu foco.',
-        'Ce conseil peut élargir votre marché ou protéger votre concentration.'
-      ],
-    CareerEventCategory.sponsor => [
-        'The money comes with an obligation to show up.',
-        'El dinero implica la obligación de estar presente.',
-        'O dinheiro traz a obrigação de estar presente.',
-        'L’argent implique une obligation de présence.'
-      ],
-    CareerEventCategory.press => [
-        'Your answer will shape the next headline.',
-        'Tu respuesta dará forma al próximo titular.',
-        'Sua resposta definirá a próxima manchete.',
-        'Votre réponse façonnera le prochain titre.'
-      ],
-    CareerEventCategory.family => [
-        'People at home need clarity, not another promise.',
-        'En casa necesitan claridad, no otra promesa.',
-        'Em casa, precisam de clareza, não de outra promessa.',
-        'Vos proches ont besoin de clarté, pas d’une nouvelle promesse.'
-      ],
-    CareerEventCategory.reputation => [
-        'Visibility can open doors while raising expectations.',
-        'La visibilidad abre puertas y aumenta las expectativas.',
-        'A visibilidade abre portas e aumenta as expectativas.',
-        'La visibilité ouvre des portes et augmente les attentes.'
-      ],
-    CareerEventCategory.wellness => [
-        'Ignoring the warning may cost more later.',
-        'Ignorar la señal puede costar más adelante.',
-        'Ignorar o aviso pode custar mais depois.',
-        'Ignorer le signal peut coûter plus cher ensuite.'
-      ],
-    CareerEventCategory.community => [
-        'A small commitment could matter well beyond the club.',
-        'Un pequeño compromiso puede importar mucho fuera del club.',
-        'Um pequeno compromisso pode importar além do clube.',
-        'Un petit engagement peut compter bien au-delà du club.'
-      ],
-    CareerEventCategory.contract => [
-        'The terms affect money, minutes, and your next move.',
-        'Las condiciones afectan dinero, minutos y tu próximo paso.',
-        'Os termos afetam dinheiro, minutos e seu próximo passo.',
-        'Les conditions touchent l’argent, le temps de jeu et la suite.'
-      ],
-  };
-  return LocalizedText({
-    for (var locale = 0; locale < supportedLocales.length; locale++)
-      supportedLocales[locale]:
-          '${openings[index % openings.length][locale]} ${stakes[locale]}',
-  });
-}
+List<CareerEventDefinition> _buildCareerEvents() => buildOffPitchScenarios();
 
 List<LifestyleItemDefinition> _buildLifestyleItems() {
   final items = <LifestyleItemDefinition>[];

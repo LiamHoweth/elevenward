@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
 import '../l10n_context.dart';
-import '../services/entitlement_service.dart';
 import '../storage/career_store.dart';
 import '../theme.dart';
 import '../ui_copy.dart';
 import 'create_career_screen.dart';
+import 'shop_screen.dart';
 
 final class CareerHubScreen extends StatelessWidget {
   const CareerHubScreen({super.key, required this.controller});
@@ -16,143 +16,161 @@ final class CareerHubScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: DecoratedBox(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [ElevenwardColors.deep, ElevenwardColors.ink],
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/visual/stadium-hero.png',
+            fit: BoxFit.cover,
+            alignment: Alignment.topCenter,
+            excludeFromSemantics: true,
           ),
-        ),
-        child: SafeArea(
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: ElevenwardColors.grass,
-                      borderRadius: BorderRadius.circular(13),
-                    ),
-                    child: const Icon(
-                      Icons.north_east_rounded,
-                      color: ElevenwardColors.ink,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Expanded(
-                    child: Text(
-                      'ELEVENWARD',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.8,
-                      ),
-                    ),
-                  ),
-                  if (controller.account != null)
-                    Tooltip(
-                      message: context.l10n.signedInAs(
-                        controller.account!.alias,
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xA607110C), ElevenwardColors.ink],
+                stops: [0, 0.62],
+              ),
+            ),
+          ),
+          SafeArea(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: ElevenwardColors.grass,
+                        borderRadius: BorderRadius.circular(13),
                       ),
                       child: const Icon(
-                        Icons.cloud_done_outlined,
-                        color: ElevenwardColors.sky,
+                        Icons.north_east_rounded,
+                        color: ElevenwardColors.ink,
                       ),
                     ),
-                ],
-              ),
-              const SizedBox(height: 44),
-              Text(
-                context.l10n.careerSlots,
-                style: Theme.of(context).textTheme.displayLarge,
-              ),
-              const SizedBox(height: 12),
-              Text(context.l10n.careerSlotsIntro),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const Icon(
-                    Icons.offline_bolt_outlined,
-                    size: 17,
-                    color: ElevenwardColors.grass,
-                  ),
-                  const SizedBox(width: 7),
-                  Text(
-                    context.l10n.offlineReady,
-                    style: const TextStyle(
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Text(
+                        'ELEVENWARD',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.8,
+                        ),
+                      ),
+                    ),
+                    if (controller.account != null)
+                      Tooltip(
+                        message: context.l10n.signedInAs(
+                          controller.account!.alias,
+                        ),
+                        child: const Icon(
+                          Icons.cloud_done_outlined,
+                          color: ElevenwardColors.sky,
+                        ),
+                      ),
+                    IconButton(
+                      tooltip: uiCopy(contentLocale(context), 'shop'),
+                      onPressed: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) => ShopScreen(controller: controller),
+                        ),
+                      ),
+                      icon: const Icon(Icons.shopping_bag_outlined),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 44),
+                Text(
+                  context.l10n.careerSlots,
+                  style: Theme.of(context).textTheme.displayLarge,
+                ),
+                const SizedBox(height: 12),
+                Text(context.l10n.careerSlotsIntro),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.offline_bolt_outlined,
+                      size: 17,
                       color: ElevenwardColors.grass,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
+                    ),
+                    const SizedBox(width: 7),
+                    Text(
+                      context.l10n.offlineReady,
+                      style: const TextStyle(
+                        color: ElevenwardColors.grass,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+                ...controller.slots.map(
+                  (slot) => Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: _SlotCard(
+                      slot: slot,
+                      onOpen: slot.isOccupied
+                          ? () => controller.openSlot(slot.slotIndex)
+                          : slot.isTombstone
+                          ? controller.synchronize
+                          : () => _create(context, slot.slotIndex),
+                      onDelete: slot.snapshot != null
+                          ? () => _confirmDelete(context, slot.slotIndex)
+                          : null,
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 28),
-              ...controller.slots.map(
-                (slot) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _SlotCard(
-                    slot: slot,
-                    onOpen: slot.isOccupied
-                        ? () => controller.openSlot(slot.slotIndex)
-                        : slot.isTombstone
-                        ? controller.synchronize
-                        : () => _create(context, slot.slotIndex),
-                    onDelete: slot.snapshot != null
-                        ? () => _confirmDelete(context, slot.slotIndex)
-                        : null,
-                  ),
                 ),
-              ),
-              FutureBuilder<List<PreservedConflict>>(
-                future: controller.store.listConflicts(),
-                builder: (context, snapshot) {
-                  final conflicts = snapshot.data ?? const [];
-                  if (conflicts.isEmpty) return const SizedBox.shrink();
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: conflicts
-                        .map(
-                          (conflict) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _HubConflictCard(
-                              conflict: conflict,
-                              controller: controller,
+                FutureBuilder<List<PreservedConflict>>(
+                  future: controller.store.listConflicts(),
+                  builder: (context, snapshot) {
+                    final conflicts = snapshot.data ?? const [];
+                    if (conflicts.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: conflicts
+                          .map(
+                            (conflict) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _HubConflictCard(
+                                conflict: conflict,
+                                controller: controller,
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(growable: false),
-                  );
-                },
-              ),
-              if (!controller.entitlementState.extraCareerSlots) ...[
+                          )
+                          .toList(growable: false),
+                    );
+                  },
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton.icon(
-                  onPressed: controller.busy
-                      ? null
-                      : () => controller.purchase('extra_career_slots'),
-                  icon: const Icon(Icons.add_card_rounded),
-                  label: Text(
-                    '${context.l10n.extraCareerSlots} · '
-                    '${controller.entitlements.localizedPrice(extraSlotsProduct) ?? uiCopy(contentLocale(context), 'storePrice')}',
+                  onPressed: () => Navigator.of(context).push<void>(
+                    MaterialPageRoute(
+                      builder: (_) => ShopScreen(controller: controller),
+                    ),
                   ),
+                  icon: const Icon(Icons.shopping_bag_outlined),
+                  label: Text(uiCopy(contentLocale(context), 'shop')),
                 ),
+                if (controller.lastMessage != null) ...[
+                  const SizedBox(height: 16),
+                  Text(
+                    controller.lastMessage!,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: ElevenwardColors.amber),
+                  ),
+                ],
               ],
-              if (controller.lastMessage != null) ...[
-                const SizedBox(height: 16),
-                Text(
-                  controller.lastMessage!,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: ElevenwardColors.amber),
-                ),
-              ],
-            ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

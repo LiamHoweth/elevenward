@@ -1,23 +1,45 @@
+import 'dart:async';
+
 import 'package:elevenward_core/elevenward_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'l10n_context.dart';
+import 'league_presentation.dart';
 import 'storage/career_store.dart';
 import 'theme.dart';
 import 'ui_copy.dart';
 import 'util/uuid.dart';
+import 'widgets/transfer_request_sheet.dart';
 
-enum _GamePhase { focus, spotlight, receipt, offseason, retired }
+enum _GamePhase {
+  focus,
+  spotlight,
+  recap,
+  careerEvent,
+  internationalCallup,
+  offseason,
+  retired,
+}
+
+_GamePhase _gamePhaseFor(CareerPhase phase) => switch (phase) {
+  CareerPhase.internationalCallup => _GamePhase.internationalCallup,
+  CareerPhase.offseason => _GamePhase.offseason,
+  CareerPhase.retired => _GamePhase.retired,
+  _ => _GamePhase.focus,
+};
 
 const _simulator = WeeklySimulator();
 const _worldSimulator = WorldSimulator();
 const _careerEngine = CareerEngine();
 final _contentCatalog = buildLaunchContent();
 
-String _matchTeamName(CareerSnapshot career, OpponentContext opponent) =>
-    opponent.competitionKind == CompetitionKind.nationalTournament
-    ? buildLaunchWorld().nationalTeams
+String _matchTeamName(
+  CareerSnapshot career,
+  OpponentContext opponent,
+  WorldDefinition world,
+) => opponent.competitionKind == CompetitionKind.nationalTournament
+    ? world.nationalTeams
           .firstWhere((team) => team.id == career.player.nationalTeamId)
           .countryName
     : career.clubName;
@@ -94,18 +116,26 @@ class GameScreen extends StatefulWidget {
     this.careerStore,
     this.slotIndex = 0,
     this.initialCareer,
+    this.initialFocus = PlayerAttribute.finishing,
     this.onCareerChanged,
+    this.onReviewOpportunity,
+    this.onFocusPreferenceChanged,
     this.contentCatalog,
     this.avatarId = 'initials',
+    this.rewardModifiers = RewardModifiers.standard,
   });
 
   final CareerStore? careerStore;
   final int slotIndex;
   final CareerSnapshot? initialCareer;
+  final PlayerAttribute initialFocus;
   final Future<void> Function(CareerSnapshot snapshot, String eventType)?
   onCareerChanged;
+  final Future<void> Function(CareerSnapshot snapshot)? onReviewOpportunity;
+  final Future<void> Function(PlayerAttribute focus)? onFocusPreferenceChanged;
   final ContentCatalog? contentCatalog;
   final String avatarId;
+  final RewardModifiers rewardModifiers;
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -115,24 +145,21 @@ class _GameScreenState extends State<GameScreen> {
   late CareerSnapshot _career;
   bool _loading = false;
   _GamePhase _phase = _GamePhase.focus;
-  PlayerAttribute _focus = PlayerAttribute.finishing;
+  late PlayerAttribute _focus;
+  bool _focusExpanded = false;
   TrainingIntensity _intensity = TrainingIntensity.balanced;
   SpotlightApproach? _approach;
-  WeeklyResult? _result;
-  CareerSnapshot? _resolvedCareer;
   CareerEventDefinition? _careerEvent;
-  EventChoiceDefinition? _selectedEventChoice;
+  WeeklyResult? _lastResult;
   bool _showWhy = false;
+  bool _resolvingDecision = false;
 
   @override
   void initState() {
     super.initState();
     _career = widget.initialCareer ?? _newCareer();
-    _phase = switch (_career.phase) {
-      CareerPhase.offseason => _GamePhase.offseason,
-      CareerPhase.retired => _GamePhase.retired,
-      _ => _GamePhase.focus,
-    };
+    _focus = widget.initialFocus;
+    _phase = _gamePhaseFor(_career.phase);
     if (widget.initialCareer == null && widget.careerStore != null) {
       _hydrateCareer();
     }
@@ -145,21 +172,19 @@ class _GameScreenState extends State<GameScreen> {
     if (incoming != null && incoming.revision > _career.revision) {
       setState(() {
         _career = incoming;
-        _phase = switch (incoming.phase) {
-          CareerPhase.offseason => _GamePhase.offseason,
-          CareerPhase.retired => _GamePhase.retired,
-          _ => _GamePhase.focus,
-        };
+        _focus = widget.initialFocus;
+        _phase = _gamePhaseFor(incoming.phase);
         _approach = null;
-        _result = null;
-        _resolvedCareer = null;
         _careerEvent = null;
-        _selectedEventChoice = null;
+        _lastResult = null;
+        _focusExpanded = false;
+        _intensity = TrainingIntensity.balanced;
       });
     }
   }
 
   ContentCatalog get _catalog => widget.contentCatalog ?? _contentCatalog;
+  WorldDefinition get _world => _catalog.world;
 
   CareerSnapshot _newCareer() {
     final careerId = generateUuidV4();
@@ -167,6 +192,8 @@ class _GameScreenState extends State<GameScreen> {
       careerId: careerId,
       seed: uuidSeed(careerId),
       updatedAt: DateTime.now().toUtc(),
+      contentVersion: _catalog.version,
+      worldDefinition: _world,
       player: PlayerState.newCareer(
         id: generateUuidV4(),
         name: 'Mika Vale',
@@ -184,11 +211,8 @@ class _GameScreenState extends State<GameScreen> {
         await widget.careerStore!.saveSlot(widget.slotIndex, _career);
       } else {
         _career = stored;
-        _phase = switch (stored.phase) {
-          CareerPhase.offseason => _GamePhase.offseason,
-          CareerPhase.retired => _GamePhase.retired,
-          _ => _GamePhase.focus,
-        };
+        _focus = await widget.careerStore!.loadWeeklyFocus(stored.careerId);
+        _phase = _gamePhaseFor(stored.phase);
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -197,7 +221,7 @@ class _GameScreenState extends State<GameScreen> {
 
   OpponentContext get _opponent {
     try {
-      return _worldSimulator.opponentFor(_career);
+      return _worldSimulator.opponentFor(_career, definition: _world);
     } on Object {
       return _fallbackOpponents[(_career.week - 1) % _fallbackOpponents.length];
     }
@@ -210,7 +234,48 @@ class _GameScreenState extends State<GameScreen> {
     return options[(_career.seed ^ _career.revision).abs() % options.length];
   }
 
-  void _openSpotlight() {
+  Future<void> _changeFocus(PlayerAttribute value) async {
+    setState(() {
+      _focus = value;
+      _focusExpanded = false;
+    });
+    try {
+      final callback = widget.onFocusPreferenceChanged;
+      if (callback != null) {
+        await callback(value);
+      } else {
+        await widget.careerStore?.saveWeeklyFocus(_career.careerId, value);
+      }
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(uiCopy(contentLocale(context), 'focusSaveFailed')),
+        ),
+      );
+    }
+  }
+
+  Future<void> _openSpotlight() async {
+    final opponent = _opponent;
+    final opened = await showGeneralDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      barrierLabel: uiCopy(contentLocale(context), 'preparingMatchup'),
+      transitionDuration: motionDuration(
+        context,
+        const Duration(milliseconds: 180),
+      ),
+      transitionBuilder: (context, animation, secondaryAnimation, child) =>
+          FadeTransition(opacity: animation, child: child),
+      pageBuilder: (context, animation, secondaryAnimation) =>
+          _PregameMatchupOverlay(
+            career: _career,
+            opponent: opponent,
+            world: _world,
+          ),
+    );
+    if (!mounted || opened != true) return;
     setState(() {
       _phase = _GamePhase.spotlight;
       _approach = null;
@@ -220,7 +285,8 @@ class _GameScreenState extends State<GameScreen> {
 
   Future<void> _commitDecision() async {
     final approach = _approach;
-    if (approach == null) return;
+    if (approach == null || _resolvingDecision) return;
+    setState(() => _resolvingDecision = true);
     final result = _simulator.advance(
       snapshot: _career,
       choice: WeeklyChoice(
@@ -233,62 +299,88 @@ class _GameScreenState extends State<GameScreen> {
         (option) => option.approach == approach,
       ),
       updatedAt: DateTime.now().toUtc(),
+      modifiers: widget.rewardModifiers,
+      definition: _world,
     );
+    final eligibleEvents = result.snapshot.phase == CareerPhase.inSeason
+        ? _careerEngine.eligibleEvents(result.snapshot, _catalog)
+        : const <CareerEventDefinition>[];
+    final event = eligibleEvents.isEmpty
+        ? null
+        : eligibleEvents[(result.snapshot.seed ^ result.snapshot.revision)
+                  .abs() %
+              eligibleEvents.length];
     setState(() {
-      _result = result;
-      final eligibleEvents = _careerEngine.eligibleEvents(
-        result.snapshot,
-        _catalog,
-      );
-      _careerEvent = eligibleEvents.isEmpty
-          ? null
-          : eligibleEvents[(result.snapshot.seed ^ result.snapshot.revision)
-                    .abs() %
-                eligibleEvents.length];
-      _resolvedCareer = null;
-      _selectedEventChoice = null;
-      _phase = _GamePhase.receipt;
-    });
-    if (result.spotlightSucceeded) {
-      await HapticFeedback.mediumImpact();
-    } else {
-      await HapticFeedback.selectionClick();
-    }
-    await _persist(result.snapshot, 'week_completed');
-  }
-
-  void _nextWeek() {
-    final next = _resolvedCareer ?? _result!.snapshot;
-    setState(() {
-      _career = next;
-      _phase = next.phase == CareerPhase.offseason
-          ? _GamePhase.offseason
-          : _GamePhase.focus;
+      _career = result.snapshot;
+      _careerEvent = event;
+      _lastResult = result;
+      _phase = _GamePhase.recap;
       _approach = null;
-      _result = null;
-      _careerEvent = null;
-      _resolvedCareer = null;
-      _selectedEventChoice = null;
       _showWhy = false;
     });
+    if (result.spotlightSucceeded) {
+      unawaited(HapticFeedback.mediumImpact());
+    } else {
+      unawaited(HapticFeedback.selectionClick());
+    }
+    try {
+      await _persist(result.snapshot, 'week_completed');
+    } finally {
+      if (mounted) setState(() => _resolvingDecision = false);
+    }
+  }
+
+  void _continueFromRecap() {
+    setState(() {
+      if (_careerEvent != null) {
+        _phase = _GamePhase.careerEvent;
+      } else {
+        _advanceTo(_career);
+      }
+    });
+    if (_phase == _GamePhase.offseason) {
+      unawaited(_requestReviewAfterPause());
+    }
+  }
+
+  Future<void> _requestReviewAfterPause() async {
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (!mounted || _phase != _GamePhase.offseason) return;
+    await widget.onReviewOpportunity?.call(_career);
   }
 
   Future<void> _chooseEvent(EventChoiceDefinition choice) async {
     final event = _careerEvent;
-    final result = _result;
-    if (event == null || result == null || _resolvedCareer != null) return;
+    if (event == null || _resolvingDecision) return;
+    setState(() => _resolvingDecision = true);
     final resolved = _careerEngine.applyEventChoice(
-      snapshot: result.snapshot,
+      snapshot: _career,
       event: event,
       choice: choice,
       updatedAt: DateTime.now().toUtc(),
+      modifiers: widget.rewardModifiers,
     );
     setState(() {
-      _resolvedCareer = resolved;
-      _selectedEventChoice = choice;
+      _career = resolved;
+      _advanceTo(resolved);
     });
-    await HapticFeedback.selectionClick();
-    await _persist(resolved, 'career_event_resolved');
+    unawaited(HapticFeedback.selectionClick());
+    try {
+      await _persist(resolved, 'career_event_resolved');
+    } finally {
+      if (mounted) setState(() => _resolvingDecision = false);
+    }
+  }
+
+  void _advanceTo(CareerSnapshot next) {
+    _career = next;
+    _phase = _gamePhaseFor(next.phase);
+    _intensity = TrainingIntensity.balanced;
+    _approach = null;
+    _careerEvent = null;
+    _lastResult = null;
+    _focusExpanded = false;
+    _showWhy = false;
   }
 
   Future<void> _completeOffseason({
@@ -300,14 +392,55 @@ class _GameScreenState extends State<GameScreen> {
       acceptedOffer: acceptedOffer,
       retire: retire,
       updatedAt: DateTime.now().toUtc(),
+      definition: _world,
     );
     setState(() {
       _career = next;
       _phase = next.retired ? _GamePhase.retired : _GamePhase.focus;
+      _intensity = TrainingIntensity.balanced;
+      _focusExpanded = false;
     });
     await _persist(
       next,
       next.retired ? 'career_retired' : 'offseason_completed',
+    );
+  }
+
+  Future<void> _editTransferRequest() async {
+    final draft = await showTransferRequestFlow(
+      context: context,
+      career: _career,
+      world: _world,
+    );
+    if (draft == null || !mounted) return;
+    final next = _careerEngine.fileTransferRequest(
+      snapshot: _career,
+      targetLeagueId: draft.targetLeagueId,
+      preferredClubId: draft.preferredClubId,
+      updatedAt: DateTime.now().toUtc(),
+      definition: _world,
+    );
+    setState(() => _career = next);
+    await _persist(next, 'transfer_requested');
+  }
+
+  Future<void> _decideNationalCallup(bool accept) async {
+    if (_resolvingDecision) return;
+    setState(() => _resolvingDecision = true);
+    final next = _careerEngine.decideNationalTeamCallUp(
+      snapshot: _career,
+      accept: accept,
+      updatedAt: DateTime.now().toUtc(),
+      definition: _world,
+    );
+    setState(() {
+      _career = next;
+      _phase = _gamePhaseFor(next.phase);
+      _resolvingDecision = false;
+    });
+    await _persist(
+      next,
+      accept ? 'national_callup_accepted' : 'national_callup_declined',
     );
   }
 
@@ -338,8 +471,6 @@ class _GameScreenState extends State<GameScreen> {
               children: [
                 _TopBar(
                   phase: _phase,
-                  season: _career.season,
-                  week: _career.week,
                   onBack: _phase == _GamePhase.spotlight
                       ? () => setState(() => _phase = _GamePhase.focus)
                       : null,
@@ -358,10 +489,13 @@ class _GameScreenState extends State<GameScreen> {
                         career: _career,
                         avatarId: widget.avatarId,
                         opponent: _opponent,
+                        world: _world,
                         focus: _focus,
+                        focusExpanded: _focusExpanded,
                         intensity: _intensity,
-                        onFocusChanged: (value) =>
-                            setState(() => _focus = value),
+                        onFocusToggle: () =>
+                            setState(() => _focusExpanded = !_focusExpanded),
+                        onFocusChanged: _changeFocus,
                         onIntensityChanged: (value) =>
                             setState(() => _intensity = value),
                         onContinue: _openSpotlight,
@@ -370,39 +504,73 @@ class _GameScreenState extends State<GameScreen> {
                         key: const ValueKey('spotlight'),
                         career: _career,
                         opponent: _opponent,
+                        world: _world,
                         focus: _focus,
                         intensity: _intensity,
                         approach: _approach,
                         situation: _situation,
                         showWhy: _showWhy,
+                        modifiers: widget.rewardModifiers,
                         onApproachChanged: (value) => setState(() {
                           _approach = value;
                           _showWhy = false;
                         }),
                         onToggleWhy: () => setState(() => _showWhy = !_showWhy),
-                        onCommit: _approach == null ? null : _commitDecision,
+                        onCommit: _approach == null || _resolvingDecision
+                            ? null
+                            : _commitDecision,
                       ),
-                      _GamePhase.receipt => _ReceiptView(
-                        key: const ValueKey('receipt'),
-                        careerBefore: _career,
-                        result: _result!,
-                        event: _careerEvent,
-                        selectedChoice: _selectedEventChoice,
-                        onChooseEvent: _chooseEvent,
-                        onContinue: _nextWeek,
+                      _GamePhase.recap => _MatchRecapView(
+                        key: const ValueKey('match-recap'),
+                        career: _career,
+                        result: _lastResult!,
+                        world: _world,
+                        onContinue: _continueFromRecap,
+                      ),
+                      _GamePhase.careerEvent => _CareerEventView(
+                        key: const ValueKey('career-event'),
+                        event: _careerEvent!,
+                        onChoose: _resolvingDecision ? null : _chooseEvent,
+                      ),
+                      _GamePhase.internationalCallup => _NationalCallupView(
+                        key: const ValueKey('international-callup'),
+                        career: _career,
+                        world: _world,
+                        requirements: _careerEngine.nationalTeamRequirements(
+                          _career,
+                          definition: _world,
+                        ),
+                        onAccept: _resolvingDecision
+                            ? null
+                            : () => _decideNationalCallup(true),
+                        onDecline: _resolvingDecision
+                            ? null
+                            : () => _decideNationalCallup(false),
                       ),
                       _GamePhase.offseason => _OffseasonView(
                         key: const ValueKey('offseason'),
                         career: _career,
-                        offers: _careerEngine.contractOffers(_career),
-                        renewal: _careerEngine.renewalOffer(_career),
+                        world: _world,
+                        offers: _careerEngine.contractOffers(
+                          _career,
+                          definition: _world,
+                        ),
+                        renewal: _careerEngine.renewalOffer(
+                          _career,
+                          definition: _world,
+                        ),
                         onStay:
                             _career.contract.seasonsRemaining > 1 ||
-                                _careerEngine.renewalOffer(_career) != null
+                                _careerEngine.renewalOffer(
+                                      _career,
+                                      definition: _world,
+                                    ) !=
+                                    null
                             ? _completeOffseason
                             : null,
                         onAccept: (offer) =>
                             _completeOffseason(acceptedOffer: offer),
+                        onEditTransferRequest: _editTransferRequest,
                         onRetire: canChooseRetirement(_career)
                             ? () => _completeOffseason(retire: true)
                             : null,
@@ -423,92 +591,129 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
-class _TopBar extends StatelessWidget {
-  const _TopBar({
-    required this.phase,
-    required this.season,
-    required this.week,
-    required this.onBack,
+final class _NationalCallupView extends StatelessWidget {
+  const _NationalCallupView({
+    super.key,
+    required this.career,
+    required this.world,
+    required this.requirements,
+    required this.onAccept,
+    required this.onDecline,
   });
 
+  final CareerSnapshot career;
+  final WorldDefinition world;
+  final NationalCallupRequirements requirements;
+  final VoidCallback? onAccept;
+  final VoidCallback? onDecline;
+
+  @override
+  Widget build(BuildContext context) {
+    final country = world.country(career.player.nationalTeamId);
+    return ListView(
+      key: const Key('world-nations-callup'),
+      padding: const EdgeInsets.fromLTRB(18, 24, 18, 32),
+      children: [
+        const Icon(
+          Icons.flag_circle_rounded,
+          size: 72,
+          color: ElevenwardColors.amber,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'WORLD NATIONS CHAMPIONSHIP',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '${country.name} has qualified, and you have been selected for the national squad.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: ElevenwardColors.muted, height: 1.4),
+        ),
+        const SizedBox(height: 20),
+        BroadcastPanel(
+          accent: ElevenwardColors.grass,
+          child: Column(
+            children: [
+              _ReviewCallupRow(
+                label: 'Your overall',
+                value: '${career.player.overall} / ${requirements.overall}',
+              ),
+              _ReviewCallupRow(
+                label: 'Your reputation',
+                value:
+                    '${career.player.reputation} / ${requirements.reputation}',
+              ),
+              const _ReviewCallupRow(
+                label: 'Format',
+                value: '32 teams · 8 groups',
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        FilledButton.icon(
+          key: const Key('accept-world-nations-callup'),
+          onPressed: onAccept,
+          icon: const Icon(Icons.flag_rounded),
+          label: const Text('ACCEPT CALL-UP'),
+        ),
+        const SizedBox(height: 9),
+        OutlinedButton(
+          key: const Key('decline-world-nations-callup'),
+          onPressed: onDecline,
+          child: const Text('DECLINE AND SIMULATE'),
+        ),
+      ],
+    );
+  }
+}
+
+final class _ReviewCallupRow extends StatelessWidget {
+  const _ReviewCallupRow({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 6),
+    child: Row(
+      children: [
+        Expanded(child: Text(label)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+      ],
+    ),
+  );
+}
+
+class _TopBar extends StatelessWidget {
+  const _TopBar({required this.phase, required this.onBack});
+
   final _GamePhase phase;
-  final int season;
-  final int week;
   final VoidCallback? onBack;
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 10, 18, 8),
-      child: Column(
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 5),
+      child: Row(
         children: [
-          Row(
-            children: [
-              if (onBack != null)
-                IconButton(
-                  tooltip: uiCopy(contentLocale(context), 'backFocus'),
-                  onPressed: onBack,
-                  icon: const Icon(Icons.arrow_back_rounded),
-                )
-              else
-                const _Mark(),
-              if (onBack != null) const SizedBox(width: 4),
-              const Expanded(
-                child: Text(
-                  'ELEVENWARD',
-                  overflow: TextOverflow.fade,
-                  softWrap: false,
-                  style: TextStyle(
-                    color: ElevenwardColors.cream,
-                    fontWeight: FontWeight.w900,
-                    fontSize: 15,
-                    letterSpacing: 1.4,
-                  ),
-                ),
+          if (onBack != null) ...[
+            SizedBox(
+              width: 40,
+              height: 40,
+              child: IconButton(
+                tooltip: uiCopy(contentLocale(context), 'backFocus'),
+                onPressed: onBack,
+                icon: const Icon(Icons.arrow_back_rounded),
               ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    '${context.l10n.seasonWeek(season, week).toUpperCase()}/18',
-                    style: const TextStyle(
-                      color: ElevenwardColors.muted,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
-                      letterSpacing: 0.7,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          _PhaseTrack(phase: phase),
+            ),
+            const SizedBox(width: 8),
+          ],
+          Expanded(child: _PhaseTrack(phase: phase)),
         ],
-      ),
-    );
-  }
-}
-
-class _Mark extends StatelessWidget {
-  const _Mark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 32,
-      height: 32,
-      margin: const EdgeInsets.only(right: 10),
-      decoration: BoxDecoration(
-        color: ElevenwardColors.grass,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: const Icon(
-        Icons.north_east_rounded,
-        color: ElevenwardColors.ink,
-        size: 20,
       ),
     );
   }
@@ -521,7 +726,11 @@ class _PhaseTrack extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final current = phase.index;
+    final current = switch (phase) {
+      _GamePhase.focus => 0,
+      _GamePhase.spotlight => 1,
+      _ => 2,
+    };
     return Row(
       children: List.generate(3, (index) {
         final active = index <= current;
@@ -540,14 +749,277 @@ class _PhaseTrack extends StatelessWidget {
   }
 }
 
+class _MatchRecapView extends StatelessWidget {
+  const _MatchRecapView({
+    super.key,
+    required this.career,
+    required this.result,
+    required this.world,
+    required this.onContinue,
+  });
+
+  final CareerSnapshot career;
+  final WeeklyResult result;
+  final WorldDefinition world;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    final playerTeam = _matchTeamName(career, result.opponent, world);
+    final home = result.opponent.isHome ? playerTeam : result.opponent.clubName;
+    final away = result.opponent.isHome ? result.opponent.clubName : playerTeam;
+    final hasBonus =
+        result.developmentMultiplier > 1 || result.moneyMultiplier > 1;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
+      children: [
+        _Eyebrow(uiCopy(locale, 'matchRecap')),
+        const SizedBox(height: 10),
+        BroadcastPanel(
+          accent: ElevenwardColors.grass,
+          child: Column(
+            children: [
+              Text(
+                result.headline,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      home,
+                      textAlign: TextAlign.end,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 18),
+                    child: Text(
+                      '${result.homeScore}  —  ${result.awayScore}',
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      away,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                  ),
+                ],
+              ),
+              const Divider(height: 32),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  _RecapMetric(
+                    icon: Icons.star_rounded,
+                    label: uiCopy(locale, 'rating'),
+                    value: result.deltas.rating.toStringAsFixed(1),
+                  ),
+                  _RecapMetric(
+                    icon: Icons.trending_up_rounded,
+                    label: _attributeName(result.trainedAttribute, locale),
+                    value: '+${result.developmentGain}',
+                  ),
+                  _RecapMetric(
+                    icon: Icons.payments_outlined,
+                    label: uiCopy(locale, 'income'),
+                    value:
+                        '${result.deltas.money >= 0 ? '+' : '−'}£${result.deltas.money.abs()}',
+                  ),
+                  _RecapMetric(
+                    icon: Icons.favorite_outline_rounded,
+                    label: uiCopy(locale, 'trust'),
+                    value:
+                        '${result.deltas.trust >= 0 ? '+' : ''}${result.deltas.trust}',
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        FilledButton(
+          key: const Key('recap-continue-button'),
+          onPressed: onContinue,
+          child: Text(uiCopy(locale, 'continue').toUpperCase()),
+        ),
+        if (result.developmentRemainder > 0) ...[
+          const SizedBox(height: 10),
+          Text(
+            '${uiCopy(locale, 'fractionalProgress')}: ${result.developmentRemainder.toStringAsFixed(1)}',
+            textAlign: TextAlign.center,
+            style: const TextStyle(color: ElevenwardColors.muted),
+          ),
+        ],
+        const SizedBox(height: 14),
+        BroadcastPanel(
+          accent: ElevenwardColors.sky,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionLabel(uiCopy(locale, 'matchStats')),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  Chip(label: Text('${result.metrics.possession}% POS')),
+                  Chip(label: Text('${result.metrics.shots} SHOTS')),
+                  Chip(
+                    label: Text('${result.metrics.shotsOnTarget} ON TARGET'),
+                  ),
+                  Chip(
+                    label: Text(
+                      '${result.metrics.expectedGoals.toStringAsFixed(1)} xG',
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                uiCopy(locale, 'matchReport').toUpperCase(),
+                style: const TextStyle(
+                  color: ElevenwardColors.sky,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: .7,
+                ),
+              ),
+              const SizedBox(height: 7),
+              Text(result.matchReport, style: const TextStyle(height: 1.48)),
+            ],
+          ),
+        ),
+        if (result.agentFee > 0 || result.agentReleased) ...[
+          const SizedBox(height: 12),
+          BroadcastPanel(
+            accent: result.agentReleased
+                ? ElevenwardColors.coral
+                : ElevenwardColors.amber,
+            child: Text(
+              result.agentReleased
+                  ? uiCopy(locale, 'agentReleased')
+                  : '−£${result.agentFee} ${uiCopy(locale, 'monthlyRetainer')}',
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        _SectionLabel(uiCopy(locale, 'topStories')),
+        const SizedBox(height: 8),
+        ...result.newsStories.map(
+          (story) => Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: BroadcastPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    story.title,
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 5),
+                  Text(
+                    story.body,
+                    style: const TextStyle(
+                      color: ElevenwardColors.muted,
+                      fontSize: 12,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (hasBonus) ...[
+          const SizedBox(height: 14),
+          BroadcastPanel(
+            accent: ElevenwardColors.amber,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionLabel(uiCopy(locale, 'appliedPassBonuses')),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (result.developmentMultiplier > 1)
+                      Chip(
+                        avatar: const Icon(Icons.trending_up_rounded, size: 18),
+                        label: Text('${result.developmentMultiplier}× DEV'),
+                      ),
+                    if (result.moneyMultiplier > 1)
+                      Chip(
+                        avatar: const Icon(Icons.payments_outlined, size: 18),
+                        label: Text('${result.moneyMultiplier}× £'),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _RecapMetric extends StatelessWidget {
+  const _RecapMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    constraints: const BoxConstraints(minWidth: 116, minHeight: 76),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: ElevenwardColors.deep,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: ElevenwardColors.line),
+    ),
+    child: Column(
+      children: [
+        Icon(icon, size: 18, color: ElevenwardColors.grass),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.w900)),
+        Text(
+          label,
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: ElevenwardColors.muted, fontSize: 11),
+        ),
+      ],
+    ),
+  );
+}
+
 class _FocusView extends StatelessWidget {
   const _FocusView({
     super.key,
     required this.career,
     required this.avatarId,
     required this.opponent,
+    required this.world,
     required this.focus,
+    required this.focusExpanded,
     required this.intensity,
+    required this.onFocusToggle,
     required this.onFocusChanged,
     required this.onIntensityChanged,
     required this.onContinue,
@@ -556,76 +1028,83 @@ class _FocusView extends StatelessWidget {
   final CareerSnapshot career;
   final String avatarId;
   final OpponentContext opponent;
+  final WorldDefinition world;
   final PlayerAttribute focus;
+  final bool focusExpanded;
   final TrainingIntensity intensity;
+  final VoidCallback onFocusToggle;
   final ValueChanged<PlayerAttribute> onFocusChanged;
   final ValueChanged<TrainingIntensity> onIntensityChanged;
   final VoidCallback onContinue;
 
   @override
   Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
+    return Column(
       children: [
-        _PlayerCard(career: career, avatarId: avatarId),
-        const SizedBox(height: 28),
-        _Eyebrow(uiCopy(contentLocale(context), 'workBeforeNoise')),
-        const SizedBox(height: 7),
-        Text(
-          context.l10n.chooseEdge,
-          style: Theme.of(context).textTheme.headlineLarge,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          context.l10n.weeklyFocusBody,
-          style: TextStyle(color: ElevenwardColors.muted, height: 1.45),
-        ),
-        const SizedBox(height: 18),
-        ...PlayerAttribute.values.expand(
-          (attribute) => [
-            _TrainingChoice(
-              icon: _attributeIcon(attribute),
-              title: _attributeName(attribute, contentLocale(context)),
-              subtitle: _attributeDescription(
-                attribute,
-                career.player.position,
-                contentLocale(context),
+        Expanded(
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            children: [
+              _PlayerCard(career: career, avatarId: avatarId),
+              const SizedBox(height: 14),
+              _NextMatchCard(career: career, opponent: opponent, world: world),
+              const SizedBox(height: 22),
+              _Eyebrow(
+                context.l10n.chooseEdge.replaceAll('.', '').toUpperCase(),
               ),
-              value: career.player.attributes[attribute],
-              selected: focus == attribute,
-              onTap: () => onFocusChanged(attribute),
-            ),
-            if (attribute != PlayerAttribute.values.last)
-              const SizedBox(height: 10),
-          ],
-        ),
-        const SizedBox(height: 22),
-        Wrap(
-          spacing: 16,
-          runSpacing: 5,
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _SectionLabel(context.l10n.trainingLoad.toUpperCase()),
-            Text(
-              _loadEffect(intensity, contentLocale(context)),
-              style: const TextStyle(
-                color: ElevenwardColors.muted,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
+              const SizedBox(height: 9),
+              _FocusSelector(
+                career: career,
+                value: focus,
+                expanded: focusExpanded,
+                onToggle: onFocusToggle,
+                onChanged: onFocusChanged,
               ),
-            ),
-          ],
+              const SizedBox(height: 20),
+              if (career.phase == CareerPhase.internationalTournament)
+                BroadcastPanel(
+                  accent: ElevenwardColors.amber,
+                  child: Text(
+                    uiCopy(contentLocale(context), 'nationalMatchdayPaused'),
+                  ),
+                )
+              else ...[
+                Wrap(
+                  spacing: 16,
+                  runSpacing: 5,
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    _SectionLabel(context.l10n.trainingLoad.toUpperCase()),
+                    Text(
+                      _loadEffect(intensity, contentLocale(context)),
+                      style: const TextStyle(
+                        color: ElevenwardColors.muted,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 9),
+                _IntensityControl(
+                  value: intensity,
+                  onChanged: onIntensityChanged,
+                ),
+              ],
+            ],
+          ),
         ),
-        const SizedBox(height: 9),
-        _IntensityControl(value: intensity, onChanged: onIntensityChanged),
-        const SizedBox(height: 22),
-        _NextMatchCard(career: career, opponent: opponent),
-        const SizedBox(height: 16),
-        FilledButton(
-          key: const Key('set-focus-button'),
-          onPressed: onContinue,
-          child: Text('${context.l10n.setFocus.toUpperCase()}  →'),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+            child: FilledButton(
+              key: const Key('weekly-continue-button'),
+              onPressed: onContinue,
+              child: Text('${context.l10n.continueLabel.toUpperCase()}  →'),
+            ),
+          ),
         ),
       ],
     );
@@ -721,6 +1200,10 @@ class _PlayerCard extends StatelessWidget {
                       label: uiCopy(contentLocale(context), 'trust'),
                       value: '${player.managerTrust}',
                     ),
+                    _TinyStat(
+                      label: uiCopy(contentLocale(context), 'balance'),
+                      value: '£${player.money}',
+                    ),
                   ],
                 ),
               ],
@@ -732,20 +1215,134 @@ class _PlayerCard extends StatelessWidget {
   }
 }
 
-class _TrainingChoice extends StatelessWidget {
-  const _TrainingChoice({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
+class _FocusSelector extends StatelessWidget {
+  const _FocusSelector({
+    required this.career,
     required this.value,
+    required this.expanded,
+    required this.onToggle,
+    required this.onChanged,
+  });
+
+  final CareerSnapshot career;
+  final PlayerAttribute value;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final ValueChanged<PlayerAttribute> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    final selectedName = _attributeName(value, locale);
+    final selectedRating = career.player.attributes[value];
+    return Column(
+      children: [
+        Semantics(
+          button: true,
+          expanded: expanded,
+          label: '$selectedName, ${uiCopy(locale, 'rating')} $selectedRating',
+          child: InkWell(
+            key: const Key('focus-selector-button'),
+            onTap: onToggle,
+            borderRadius: BorderRadius.circular(17),
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 60),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: ElevenwardColors.grassDark,
+                border: Border.all(color: ElevenwardColors.grass, width: 1.5),
+                borderRadius: BorderRadius.circular(17),
+              ),
+              child: Row(
+                children: [
+                  _FocusIcon(attribute: value, selected: true),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      selectedName,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '$selectedRating',
+                    style: const TextStyle(
+                      color: ElevenwardColors.grass,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  AnimatedRotation(
+                    turns: expanded ? 0.5 : 0,
+                    duration: motionDuration(
+                      context,
+                      const Duration(milliseconds: 180),
+                    ),
+                    child: const Icon(
+                      Icons.keyboard_arrow_down_rounded,
+                      color: ElevenwardColors.grass,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        ClipRect(
+          child: AnimatedSize(
+            duration: motionDuration(
+              context,
+              const Duration(milliseconds: 220),
+            ),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: expanded
+                ? Container(
+                    key: const Key('focus-options'),
+                    margin: const EdgeInsets.only(top: 7),
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: ElevenwardColors.panel,
+                      border: Border.all(color: ElevenwardColors.line),
+                      borderRadius: BorderRadius.circular(15),
+                    ),
+                    child: Column(
+                      children: PlayerAttribute.values
+                          .map(
+                            (attribute) => _FocusOption(
+                              attribute: attribute,
+                              name: _attributeName(attribute, locale),
+                              rating: career.player.attributes[attribute],
+                              selected: attribute == value,
+                              onTap: () => onChanged(attribute),
+                            ),
+                          )
+                          .toList(growable: false),
+                    ),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _FocusOption extends StatelessWidget {
+  const _FocusOption({
+    required this.attribute,
+    required this.name,
+    required this.rating,
     required this.selected,
     required this.onTap,
   });
 
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final int value;
+  final PlayerAttribute attribute;
+  final String name;
+  final int rating;
   final bool selected;
   final VoidCallback onTap;
 
@@ -754,85 +1351,81 @@ class _TrainingChoice extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
-      label: '$title, rating $value. $subtitle',
+      label: '$name, ${uiCopy(contentLocale(context), 'rating')} $rating',
       child: InkWell(
+        key: Key('focus-option-${attribute.name}'),
         onTap: onTap,
-        borderRadius: BorderRadius.circular(17),
-        child: AnimatedContainer(
-          duration: motionDuration(context, const Duration(milliseconds: 180)),
-          padding: const EdgeInsets.all(14),
+        borderRadius: BorderRadius.circular(11),
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
           decoration: BoxDecoration(
             color: selected
-                ? ElevenwardColors.grassDark
-                : ElevenwardColors.panel,
-            border: Border.all(
-              color: selected ? ElevenwardColors.grass : ElevenwardColors.line,
-              width: selected ? 1.5 : 1,
-            ),
-            borderRadius: BorderRadius.circular(17),
+                ? ElevenwardColors.grass.withValues(alpha: 0.10)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(11),
           ),
           child: Row(
             children: [
-              Container(
-                width: 43,
-                height: 43,
-                decoration: BoxDecoration(
-                  color: selected
-                      ? ElevenwardColors.grass.withValues(alpha: 0.16)
-                      : ElevenwardColors.panelLight,
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: Icon(
-                  icon,
-                  color: selected
-                      ? ElevenwardColors.grass
-                      : ElevenwardColors.muted,
-                ),
-              ),
-              const SizedBox(width: 13),
+              _FocusIcon(attribute: attribute, selected: selected),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 15,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        color: ElevenwardColors.muted,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  name,
+                  style: TextStyle(
+                    color: selected
+                        ? ElevenwardColors.cream
+                        : ElevenwardColors.muted,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
               ),
               Text(
-                '$value',
+                '$rating',
                 style: TextStyle(
                   color: selected
                       ? ElevenwardColors.grass
                       : ElevenwardColors.cream,
-                  fontSize: 21,
                   fontWeight: FontWeight.w900,
                 ),
               ),
-              const SizedBox(width: 7),
+              const SizedBox(width: 9),
               Icon(
                 selected ? Icons.check_circle_rounded : Icons.circle_outlined,
                 color: selected
                     ? ElevenwardColors.grass
                     : ElevenwardColors.line,
-                size: 21,
+                size: 19,
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _FocusIcon extends StatelessWidget {
+  const _FocusIcon({required this.attribute, required this.selected});
+
+  final PlayerAttribute attribute;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: selected
+            ? ElevenwardColors.grass.withValues(alpha: 0.16)
+            : ElevenwardColors.panelLight,
+        borderRadius: BorderRadius.circular(11),
+      ),
+      child: Icon(
+        _attributeIcon(attribute),
+        color: selected ? ElevenwardColors.grass : ElevenwardColors.muted,
+        size: 20,
       ),
     );
   }
@@ -858,6 +1451,7 @@ class _IntensityControl extends StatelessWidget {
           final active = item == value;
           return Expanded(
             child: Semantics(
+              key: Key('training-intensity-${item.name}'),
               button: true,
               selected: active,
               child: InkWell(
@@ -895,10 +1489,15 @@ class _IntensityControl extends StatelessWidget {
 }
 
 class _NextMatchCard extends StatelessWidget {
-  const _NextMatchCard({required this.career, required this.opponent});
+  const _NextMatchCard({
+    required this.career,
+    required this.opponent,
+    required this.world,
+  });
 
   final CareerSnapshot career;
   final OpponentContext opponent;
+  final WorldDefinition world;
 
   @override
   Widget build(BuildContext context) {
@@ -920,8 +1519,8 @@ class _NextMatchCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   opponent.isHome
-                      ? '${_matchTeamName(career, opponent)} vs ${opponent.clubName}'
-                      : '${opponent.clubName} vs ${_matchTeamName(career, opponent)}',
+                      ? '${_matchTeamName(career, opponent, world)} vs ${opponent.clubName}'
+                      : '${opponent.clubName} vs ${_matchTeamName(career, opponent, world)}',
                   style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
               ],
@@ -944,16 +1543,417 @@ class _NextMatchCard extends StatelessWidget {
   }
 }
 
+class _PregameMatchupOverlay extends StatefulWidget {
+  const _PregameMatchupOverlay({
+    required this.career,
+    required this.opponent,
+    required this.world,
+  });
+
+  static const delay = Duration(seconds: 2);
+
+  final CareerSnapshot career;
+  final OpponentContext opponent;
+  final WorldDefinition world;
+
+  @override
+  State<_PregameMatchupOverlay> createState() => _PregameMatchupOverlayState();
+}
+
+class _PregameMatchupOverlayState extends State<_PregameMatchupOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 620),
+  );
+  late final Animation<double> _homeEntrance = CurvedAnimation(
+    parent: _controller,
+    curve: const Interval(0, 0.62, curve: Curves.easeOutBack),
+  );
+  late final Animation<double> _awayEntrance = CurvedAnimation(
+    parent: _controller,
+    curve: const Interval(0.14, 0.78, curve: Curves.easeOutBack),
+  );
+  late final Animation<double> _versusPulse = TweenSequence<double>([
+    TweenSequenceItem(tween: Tween<double>(begin: 1, end: 1), weight: 40),
+    TweenSequenceItem(
+      tween: Tween<double>(
+        begin: 1,
+        end: 1.10,
+      ).chain(CurveTween(curve: Curves.easeOut)),
+      weight: 25,
+    ),
+    TweenSequenceItem(
+      tween: Tween<double>(
+        begin: 1.10,
+        end: 1,
+      ).chain(CurveTween(curve: Curves.easeIn)),
+      weight: 35,
+    ),
+  ]).animate(_controller);
+
+  Timer? _timer;
+  bool _started = false;
+  bool _dismissed = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _controller.value = 1;
+    } else {
+      _controller.forward();
+    }
+    _timer = Timer(_PregameMatchupOverlay.delay, _dismiss);
+  }
+
+  void _dismiss() {
+    if (_dismissed || !mounted) return;
+    _dismissed = true;
+    _timer?.cancel();
+    Navigator.of(context).pop(true);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    final identities = _matchupIdentities(
+      widget.career,
+      widget.opponent,
+      widget.world,
+    );
+    final home = identities.$1;
+    final away = identities.$2;
+    return Material(
+      key: const Key('matchup-loading-overlay'),
+      color: ElevenwardColors.deep,
+      child: Semantics(
+        button: true,
+        label:
+            '${uiCopy(locale, 'homeTeam')} ${home.name} ${uiCopy(locale, 'versus')} ${uiCopy(locale, 'awayTeam')} ${away.name}. ${uiCopy(locale, 'tapToContinue')}',
+        child: InkWell(
+          onTap: _dismiss,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                'assets/visual/matchday-tunnel.png',
+                fit: BoxFit.cover,
+                excludeFromSemantics: true,
+              ),
+              const ColoredBox(color: Color(0xB307110C)),
+              SafeArea(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 28,
+                    ),
+                    child: Container(
+                      width: double.infinity,
+                      constraints: const BoxConstraints(maxWidth: 560),
+                      padding: const EdgeInsets.fromLTRB(14, 24, 14, 21),
+                      decoration: BoxDecoration(
+                        color: ElevenwardColors.panel,
+                        border: Border.all(color: ElevenwardColors.line),
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x55000000),
+                            blurRadius: 28,
+                            offset: Offset(0, 14),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _Eyebrow(uiCopy(locale, 'upNext')),
+                          const SizedBox(height: 20),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Expanded(
+                                child: _AnimatedMatchupTeam(
+                                  animation: _homeEntrance,
+                                  identity: home,
+                                  role: uiCopy(locale, 'homeTeam'),
+                                  keyPrefix: 'home',
+                                ),
+                              ),
+                              const SizedBox(width: 7),
+                              ScaleTransition(
+                                scale: _versusPulse,
+                                child: Container(
+                                  width: 42,
+                                  height: 42,
+                                  alignment: Alignment.center,
+                                  decoration: BoxDecoration(
+                                    color: ElevenwardColors.panelLight,
+                                    border: Border.all(
+                                      color: ElevenwardColors.line,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Text(
+                                    uiCopy(locale, 'versusShort'),
+                                    style: const TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w900,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 7),
+                              Expanded(
+                                child: _AnimatedMatchupTeam(
+                                  animation: _awayEntrance,
+                                  identity: away,
+                                  role: uiCopy(locale, 'awayTeam'),
+                                  keyPrefix: 'away',
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 21),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.4,
+                                  color: ElevenwardColors.grass,
+                                ),
+                              ),
+                              const SizedBox(width: 9),
+                              Flexible(
+                                child: Text(
+                                  uiCopy(locale, 'preparingMatchup'),
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: ElevenwardColors.muted,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 7),
+                          Text(
+                            uiCopy(locale, 'tapToContinue'),
+                            style: const TextStyle(
+                              color: ElevenwardColors.muted,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AnimatedMatchupTeam extends StatelessWidget {
+  const _AnimatedMatchupTeam({
+    required this.animation,
+    required this.identity,
+    required this.role,
+    required this.keyPrefix,
+  });
+
+  final Animation<double> animation;
+  final _MatchupIdentity identity;
+  final String role;
+  final String keyPrefix;
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: animation,
+      child: ScaleTransition(
+        scale: Tween(begin: 0.88, end: 1.0).animate(animation),
+        child: Column(
+          children: [
+            Text(
+              role,
+              style: const TextStyle(
+                color: ElevenwardColors.muted,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 0.7,
+              ),
+            ),
+            const SizedBox(height: 9),
+            Container(
+              key: Key('matchup-$keyPrefix-badge'),
+              width: 92,
+              height: 92,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [identity.primary, identity.secondary],
+                ),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: ElevenwardColors.cream.withValues(alpha: 0.22),
+                  width: 2,
+                ),
+              ),
+              child: Text(
+                identity.shortName,
+                style: TextStyle(
+                  color: _badgeTextColor(identity.primary),
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.6,
+                ),
+              ),
+            ),
+            const SizedBox(height: 9),
+            Text(
+              identity.name,
+              key: Key('matchup-$keyPrefix-name'),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w900,
+                height: 1.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+final class _MatchupIdentity {
+  const _MatchupIdentity({
+    required this.name,
+    required this.shortName,
+    required this.primary,
+    required this.secondary,
+  });
+
+  final String name;
+  final String shortName;
+  final Color primary;
+  final Color secondary;
+}
+
+(_MatchupIdentity, _MatchupIdentity) _matchupIdentities(
+  CareerSnapshot career,
+  OpponentContext opponent,
+  WorldDefinition world,
+) {
+  final player = _matchupIdentity(
+    opponent.competitionKind == CompetitionKind.nationalTournament
+        ? career.player.nationalTeamId
+        : career.clubId,
+    _matchTeamName(career, opponent, world),
+    world,
+    playerFallback: true,
+  );
+  final rival = _matchupIdentity(
+    opponent.clubId,
+    opponent.clubName,
+    world,
+    playerFallback: false,
+  );
+  return opponent.isHome ? (player, rival) : (rival, player);
+}
+
+_MatchupIdentity _matchupIdentity(
+  String id,
+  String fallbackName,
+  WorldDefinition world, {
+  required bool playerFallback,
+}) {
+  for (final club in world.clubs) {
+    if (club.id == id) {
+      return _MatchupIdentity(
+        name: club.name,
+        shortName: club.shortName,
+        primary: Color(club.primaryColor),
+        secondary: Color(club.secondaryColor),
+      );
+    }
+  }
+  for (final team in world.nationalTeams) {
+    if (team.id == id) {
+      return _MatchupIdentity(
+        name: team.countryName,
+        shortName: _teamInitials(team.countryName),
+        primary: playerFallback
+            ? ElevenwardColors.grass
+            : ElevenwardColors.amber,
+        secondary: playerFallback
+            ? ElevenwardColors.sky
+            : ElevenwardColors.coral,
+      );
+    }
+  }
+  return _MatchupIdentity(
+    name: fallbackName,
+    shortName: _teamInitials(fallbackName),
+    primary: playerFallback ? ElevenwardColors.grass : ElevenwardColors.amber,
+    secondary: playerFallback ? ElevenwardColors.sky : ElevenwardColors.coral,
+  );
+}
+
+String _teamInitials(String name) {
+  final words = name
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .toList(growable: false);
+  if (words.isEmpty) return 'FC';
+  if (words.length == 1) {
+    return words.first
+        .substring(0, words.first.length.clamp(1, 2))
+        .toUpperCase();
+  }
+  return '${words.first[0]}${words.last[0]}'.toUpperCase();
+}
+
+Color _badgeTextColor(Color background) =>
+    ThemeData.estimateBrightnessForColor(background) == Brightness.dark
+    ? ElevenwardColors.cream
+    : ElevenwardColors.ink;
+
 class _SpotlightView extends StatelessWidget {
   const _SpotlightView({
     super.key,
     required this.career,
     required this.opponent,
+    required this.world,
     required this.focus,
     required this.intensity,
     required this.approach,
     required this.situation,
     required this.showWhy,
+    required this.modifiers,
     required this.onApproachChanged,
     required this.onToggleWhy,
     required this.onCommit,
@@ -961,11 +1961,13 @@ class _SpotlightView extends StatelessWidget {
 
   final CareerSnapshot career;
   final OpponentContext opponent;
+  final WorldDefinition world;
   final PlayerAttribute focus;
   final TrainingIntensity intensity;
   final SpotlightApproach? approach;
   final MatchSituationDefinition situation;
   final bool showWhy;
+  final RewardModifiers modifiers;
   final ValueChanged<SpotlightApproach> onApproachChanged;
   final VoidCallback onToggleWhy;
   final VoidCallback? onCommit;
@@ -980,6 +1982,7 @@ class _SpotlightView extends StatelessWidget {
         situationOption: situation.options.firstWhere(
           (option) => option.approach == choice,
         ),
+        modifiers: modifiers,
       );
 
   @override
@@ -990,12 +1993,13 @@ class _SpotlightView extends StatelessWidget {
       opponent: opponent,
       focus: focus,
       intensity: intensity,
+      modifiers: modifiers,
     );
     final selectedPreview = approach == null ? null : _preview(approach!);
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
       children: [
-        _MatchHeader(career: career, opponent: opponent),
+        _MatchHeader(career: career, opponent: opponent, world: world),
         const SizedBox(height: 12),
         _SelectionCard(selection: selection),
         const SizedBox(height: 26),
@@ -1018,6 +2022,7 @@ class _SpotlightView extends StatelessWidget {
         ],
         const SizedBox(height: 17),
         _ActionCard(
+          key: const Key('spotlight-option-safe'),
           title: situation.options[0].title.forLocale(locale),
           subtitle: _approachSubtitle(SpotlightApproach.safe, locale),
           risk: uiCopy(locale, 'lowRisk'),
@@ -1028,6 +2033,7 @@ class _SpotlightView extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _ActionCard(
+          key: const Key('spotlight-option-balanced'),
           title: situation.options[1].title.forLocale(locale),
           subtitle: _approachSubtitle(SpotlightApproach.balanced, locale),
           risk: uiCopy(locale, 'balanced'),
@@ -1038,6 +2044,7 @@ class _SpotlightView extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         _ActionCard(
+          key: const Key('spotlight-option-bold'),
           title: situation.options[2].title.forLocale(locale),
           subtitle: _approachSubtitle(SpotlightApproach.bold, locale),
           risk: uiCopy(locale, 'highRisk'),
@@ -1132,26 +2139,33 @@ class _SpotlightView extends StatelessWidget {
 }
 
 class _MatchHeader extends StatelessWidget {
-  const _MatchHeader({required this.career, required this.opponent});
+  const _MatchHeader({
+    required this.career,
+    required this.opponent,
+    required this.world,
+  });
 
   final CareerSnapshot career;
   final OpponentContext opponent;
+  final WorldDefinition world;
 
   @override
   Widget build(BuildContext context) {
-    final teamName = _matchTeamName(career, opponent);
+    final teamName = _matchTeamName(career, opponent, world);
     final home = opponent.isHome ? teamName : opponent.clubName;
     final away = opponent.isHome ? opponent.clubName : teamName;
-    final world = buildLaunchWorld();
-    final leagueName = world.leagues
-        .firstWhere(
-          (league) =>
-              career.world.leagueParticipants[league.id]?.contains(
-                career.clubId,
-              ) ??
-              false,
-        )
-        .name;
+    final competitionName =
+        opponent.competitionKind == CompetitionKind.nationalTournament
+        ? 'World Nations Championship'
+        : world.leagues
+              .firstWhere(
+                (league) =>
+                    career.world.leagueParticipants[league.id]?.contains(
+                      career.clubId,
+                    ) ??
+                    false,
+              )
+              .name;
     return _Panel(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
       child: Row(
@@ -1163,7 +2177,7 @@ class _MatchHeader extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Column(
               children: [
-                _SectionLabel(leagueName.toUpperCase()),
+                _SectionLabel(competitionName.toUpperCase()),
                 const SizedBox(height: 5),
                 const Text(
                   'VS',
@@ -1314,6 +2328,7 @@ class _CoachTip extends StatelessWidget {
 
 class _ActionCard extends StatelessWidget {
   const _ActionCard({
+    super.key,
     required this.title,
     required this.subtitle,
     required this.risk,
@@ -1341,7 +2356,7 @@ class _ActionCard extends StatelessWidget {
       button: true,
       selected: selected,
       label:
-          '$title. $risk. Projected success ${preview.chanceLow} to ${preview.chanceHigh} percent. Uses $attributes.',
+          '$title. $risk. ${uiCopy(locale, 'projectedSuccess')}: ${preview.chanceLow}–${preview.chanceHigh}%. ${uiCopy(locale, 'usesAttributes')}: $attributes.',
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(17),
@@ -1471,340 +2486,70 @@ class _WhyPanel extends StatelessWidget {
   }
 }
 
-class _ReceiptView extends StatelessWidget {
-  const _ReceiptView({
+class _CareerEventView extends StatelessWidget {
+  const _CareerEventView({
     super.key,
-    required this.careerBefore,
-    required this.result,
     required this.event,
-    required this.selectedChoice,
-    required this.onChooseEvent,
-    required this.onContinue,
+    required this.onChoose,
   });
 
-  final CareerSnapshot careerBefore;
-  final WeeklyResult result;
-  final CareerEventDefinition? event;
-  final EventChoiceDefinition? selectedChoice;
-  final ValueChanged<EventChoiceDefinition> onChooseEvent;
-  final VoidCallback onContinue;
+  final CareerEventDefinition event;
+  final ValueChanged<EventChoiceDefinition>? onChoose;
 
   @override
   Widget build(BuildContext context) {
     final locale = contentLocale(context);
-    final event = this.event;
-    final teamName =
-        result.opponent.competitionKind == CompetitionKind.nationalTournament
-        ? buildLaunchWorld().nationalTeams
-              .firstWhere(
-                (team) => team.id == careerBefore.player.nationalTeamId,
-              )
-              .countryName
-        : careerBefore.clubName;
-    final home = result.opponent.isHome ? teamName : result.opponent.clubName;
-    final away = result.opponent.isHome ? result.opponent.clubName : teamName;
     return ListView(
-      padding: const EdgeInsets.fromLTRB(18, 14, 18, 30),
+      key: const Key('career-event-prompt'),
+      padding: const EdgeInsets.fromLTRB(18, 28, 18, 34),
       children: [
         Center(
           child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+            width: 58,
+            height: 58,
             decoration: BoxDecoration(
-              color: result.spotlightSucceeded
-                  ? ElevenwardColors.grass.withValues(alpha: 0.14)
-                  : ElevenwardColors.coral.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(99),
-            ),
-            child: Text(
-              uiCopy(
-                locale,
-                result.spotlightSucceeded ? 'momentWon' : 'momentMissed',
-              ),
-              style: TextStyle(
-                color: result.spotlightSucceeded
-                    ? ElevenwardColors.grass
-                    : ElevenwardColors.coral,
-                fontWeight: FontWeight.w900,
-                fontSize: 11,
-                letterSpacing: 0.9,
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 15),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Text(
-                home,
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                '${result.homeScore} — ${result.awayScore}',
-                style: Theme.of(context).textTheme.displayLarge,
-              ),
-            ),
-            Expanded(
-              child: Text(
-                away,
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 9),
-        if (result.fixtureDecision != FixtureDecision.regulation) ...[
-          Text(
-            uiCopy(
-              locale,
-              result.fixtureDecision == FixtureDecision.extraTime
-                  ? 'afterExtraTime'
-                  : 'afterPenalties',
-            ),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: ElevenwardColors.amber,
-              fontSize: 12,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 5),
-        ],
-        Text(
-          _localizedMatchHeadline(
-            locale,
-            careerBefore.player.name,
-            result.spotlightSucceeded,
-          ),
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: ElevenwardColors.muted),
-        ),
-        const SizedBox(height: 23),
-        _Panel(
-          padding: const EdgeInsets.all(17),
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _SectionLabel(uiCopy(locale, 'matchRating')),
-                        const SizedBox(height: 5),
-                        Text(
-                          '${result.deltas.rating}',
-                          style: Theme.of(context).textTheme.headlineLarge,
-                        ),
-                      ],
-                    ),
-                  ),
-                  _RoundStat(
-                    value: '${result.deltas.goals}',
-                    label: uiCopy(locale, 'goals'),
-                  ),
-                  const SizedBox(width: 10),
-                  _RoundStat(
-                    value: '${result.deltas.assists}',
-                    label: uiCopy(locale, 'assists'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 17),
-              const Divider(height: 1),
-              const SizedBox(height: 15),
-              Wrap(
-                spacing: 7,
-                runSpacing: 7,
-                children: [
-                  _DeltaChip(
-                    label: uiCopy(locale, 'trust'),
-                    value: result.deltas.trust,
-                  ),
-                  _DeltaChip(
-                    label: uiCopy(locale, 'form'),
-                    value: result.deltas.form,
-                  ),
-                  _DeltaChip(
-                    label: uiCopy(locale, 'fitness'),
-                    value: result.deltas.fitness,
-                  ),
-                  _DeltaChip(
-                    label: uiCopy(locale, 'reputation'),
-                    value: result.deltas.reputation,
-                  ),
-                  _DeltaChip(
-                    label: uiCopy(locale, 'pay'),
-                    value: result.deltas.money,
-                    money: true,
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        if (result.sponsorPayout > 0 || result.endedSponsorIds.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _Panel(
-            padding: const EdgeInsets.all(14),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.handshake_outlined,
-                  color: ElevenwardColors.amber,
-                ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${uiCopy(locale, 'sponsorEarnings')}: £${result.sponsorPayout}',
-                        style: const TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                      if (result.endedSponsorIds.isNotEmpty)
-                        Text(
-                          uiCopy(locale, 'sponsorEnded'),
-                          style: const TextStyle(
-                            color: ElevenwardColors.muted,
-                            fontSize: 12,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-        const SizedBox(height: 21),
-        _Eyebrow(uiCopy(locale, 'whyHappened')),
-        const SizedBox(height: 9),
-        _Panel(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            children: [
-              ...result.factors
-                  .take(4)
-                  .map((factor) => _FactorRow(factor: factor)),
-              const Divider(height: 20),
-              Row(
-                children: [
-                  const Icon(
-                    Icons.casino_outlined,
-                    color: ElevenwardColors.muted,
-                    size: 18,
-                  ),
-                  const SizedBox(width: 9),
-                  Expanded(
-                    child: Text(
-                      uiCopy(locale, 'seededRoll'),
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '${result.roll}  /  < ${result.preview.chance}',
-                    style: const TextStyle(
-                      color: ElevenwardColors.muted,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (event != null) ...[
-          _Eyebrow(uiCopy(locale, 'awayPitch')),
-          const SizedBox(height: 9),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: ElevenwardColors.amber.withValues(alpha: 0.10),
+              color: ElevenwardColors.amber.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
               border: Border.all(
-                color: ElevenwardColors.amber.withValues(alpha: 0.40),
-              ),
-              borderRadius: BorderRadius.circular(17),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(
-                  Icons.people_alt_outlined,
-                  color: ElevenwardColors.amber,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        event.title.forLocale(locale),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w900,
-                          fontSize: 15,
-                        ),
-                      ),
-                      const SizedBox(height: 5),
-                      Text(
-                        event.body.forLocale(locale),
-                        style: const TextStyle(
-                          color: ElevenwardColors.muted,
-                          fontSize: 13,
-                          height: 1.4,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          ...event.choices.map(
-            (choice) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Semantics(
-                button: true,
-                selected: selectedChoice?.id == choice.id,
-                child: OutlinedButton(
-                  onPressed: selectedChoice == null
-                      ? () => onChooseEvent(choice)
-                      : null,
-                  style: OutlinedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(48),
-                    side: BorderSide(
-                      color: selectedChoice?.id == choice.id
-                          ? ElevenwardColors.grass
-                          : ElevenwardColors.line,
-                    ),
-                  ),
-                  child: Text(choice.label.forLocale(locale)),
-                ),
+                color: ElevenwardColors.amber.withValues(alpha: 0.45),
               ),
             ),
+            child: const Icon(
+              Icons.people_alt_outlined,
+              color: ElevenwardColors.amber,
+              size: 28,
+            ),
           ),
-        ],
-        const SizedBox(height: 20),
-        FilledButton(
-          key: const Key('next-week-button'),
-          onPressed: event != null && selectedChoice == null
-              ? null
-              : onContinue,
-          child: Text(
-            result.snapshot.phase == CareerPhase.offseason
-                ? '${uiCopy(locale, 'continueOffseason')}  →'
-                : '${context.l10n.continueLabel.toUpperCase()} · ${context.l10n.seasonWeek(result.snapshot.season, result.snapshot.week).toUpperCase()}  →',
+        ),
+        const SizedBox(height: 18),
+        _Eyebrow(uiCopy(locale, 'awayPitch')),
+        const SizedBox(height: 8),
+        Text(
+          event.title.forLocale(locale),
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 9),
+        Text(
+          event.body.forLocale(locale),
+          style: const TextStyle(
+            color: ElevenwardColors.muted,
+            fontSize: 14,
+            height: 1.45,
+          ),
+        ),
+        const SizedBox(height: 22),
+        ...event.choices.map(
+          (choice) => Padding(
+            padding: const EdgeInsets.only(bottom: 9),
+            child: OutlinedButton(
+              key: Key('career-event-choice-${choice.id}'),
+              onPressed: onChoose == null ? null : () => onChoose!(choice),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50),
+                side: const BorderSide(color: ElevenwardColors.line),
+              ),
+              child: Text(choice.label.forLocale(locale)),
+            ),
           ),
         ),
       ],
@@ -1816,30 +2561,68 @@ class _OffseasonView extends StatelessWidget {
   const _OffseasonView({
     super.key,
     required this.career,
+    required this.world,
     required this.offers,
     required this.renewal,
     required this.onStay,
     required this.onAccept,
+    required this.onEditTransferRequest,
     required this.onRetire,
   });
 
   final CareerSnapshot career;
+  final WorldDefinition world;
   final List<ContractOffer> offers;
   final ContractOffer? renewal;
   final VoidCallback? onStay;
   final ValueChanged<ContractOffer> onAccept;
+  final VoidCallback onEditTransferRequest;
   final VoidCallback? onRetire;
 
   @override
   Widget build(BuildContext context) {
-    final world = buildLaunchWorld();
     final locale = contentLocale(context);
-    final market = const CareerEngine().transferMarketReport(career);
+    final market = const CareerEngine().transferMarketReport(
+      career,
+      definition: world,
+    );
     final rejected = market.where((entry) => !entry.accepted).take(3);
+    final marketState = const WorldSimulator().beginNextSeason(
+      career.world,
+      career.seed,
+      definition: world,
+    );
+    final request = career.transferRequest;
+    final targetIds = request == null
+        ? const <String>{}
+        : marketState.leagueParticipants[request.targetLeagueId]?.toSet() ??
+              const <String>{};
+    final hasTargetOffer = offers.any(
+      (offer) => targetIds.contains(offer.clubId),
+    );
+    final targetFeedback = _strongestTargetRejection(
+      locale: locale,
+      targetIds: targetIds,
+      market: market,
+      world: world,
+    );
+    final targetLeague = request == null
+        ? null
+        : world.leagues
+              .where((league) => league.id == request.targetLeagueId)
+              .firstOrNull;
+    final preferredClub = request?.preferredClubId == null
+        ? null
+        : world.clubs
+              .where((club) => club.id == request!.preferredClubId)
+              .firstOrNull;
     final leagueId = career.world.leagueIdForClub(career.clubId);
     final table = career.world.table(leagueId);
     final placement =
         table.indexWhere((row) => row.clubId == career.clubId) + 1;
+    final nationalHistory = career.world.nationalTournamentHistory
+        .where((entry) => entry.season == career.season)
+        .firstOrNull;
     return ListView(
       padding: const EdgeInsets.fromLTRB(18, 14, 18, 34),
       children: [
@@ -1886,7 +2669,68 @@ class _OffseasonView extends StatelessWidget {
             ],
           ),
         ),
+        if (nationalHistory != null) ...[
+          const SizedBox(height: 14),
+          BroadcastPanel(
+            accent: ElevenwardColors.amber,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const _SectionLabel('WORLD NATIONS CHAMPIONSHIP'),
+                const SizedBox(height: 8),
+                Text(
+                  '${world.nationalTeam(nationalHistory.winnerId).countryName} won the championship.',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  '${_nationalFinishLabel(nationalHistory.playerFinish)} · ${nationalHistory.playerAppearances} appearances',
+                  style: const TextStyle(color: ElevenwardColors.muted),
+                ),
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: 24),
+        if (request != null) ...[
+          BroadcastPanel(
+            accent: ElevenwardColors.amber,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    const Icon(
+                      Icons.outbound_outlined,
+                      color: ElevenwardColors.amber,
+                    ),
+                    const SizedBox(width: 9),
+                    Expanded(
+                      child: Text(
+                        uiCopy(locale, 'transferRequestActive'),
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                Text(
+                  '${uiCopy(locale, 'targetLeague')}: ${targetLeague == null ? request.targetLeagueId : leagueDisplayName(targetLeague)}',
+                ),
+                Text(
+                  '${uiCopy(locale, 'preferredClub')}: ${request.preferredClubId == null ? uiCopy(locale, 'anyEligibleClub') : preferredClub?.name ?? request.preferredClubId}',
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  key: const Key('offseason-edit-transfer-request'),
+                  onPressed: onEditTransferRequest,
+                  child: Text(uiCopy(locale, 'editTransferRequest')),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
+        ],
         _Eyebrow(context.l10n.contractOffers.toUpperCase()),
         const SizedBox(height: 9),
         if (career.contract.seasonsRemaining <= 1) ...[
@@ -1918,6 +2762,12 @@ class _OffseasonView extends StatelessWidget {
           final club = world.clubs.firstWhere(
             (item) => item.id == offer.clubId,
           );
+          final destinationLeagueId = marketState.leagueIdForClub(club.id);
+          final destinationLeague = world.leagues.firstWhere(
+            (league) => league.id == destinationLeagueId,
+          );
+          final isTarget = targetIds.contains(club.id);
+          final isPreferred = request?.preferredClubId == club.id && isTarget;
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _Panel(
@@ -1951,6 +2801,33 @@ class _OffseasonView extends StatelessWidget {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '${world.country(destinationLeague.countryId).nameFor(locale)} · ${leagueDisplayName(destinationLeague)}',
+                    style: const TextStyle(
+                      color: ElevenwardColors.muted,
+                      fontSize: 12,
+                    ),
+                  ),
+                  if (isTarget || isPreferred) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        if (isTarget)
+                          Chip(
+                            avatar: const Icon(Icons.flag_outlined, size: 15),
+                            label: Text(uiCopy(locale, 'targetLeagueOffer')),
+                          ),
+                        if (isPreferred)
+                          Chip(
+                            avatar: const Icon(Icons.star_outline, size: 15),
+                            label: Text(uiCopy(locale, 'preferredClubOffer')),
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 8),
                   Text(localizedTransferReason(locale, offer.interestReason)),
                   const SizedBox(height: 8),
@@ -1989,6 +2866,40 @@ class _OffseasonView extends StatelessWidget {
         }),
         if (offers.isEmpty) ...[
           Text(uiCopy(locale, 'noOffers')),
+          const SizedBox(height: 12),
+        ],
+        if (request != null && !hasTargetOffer) ...[
+          BroadcastPanel(
+            accent: ElevenwardColors.coral,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  uiCopy(locale, 'noTargetOffer'),
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+                if (targetFeedback != null) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    '${uiCopy(locale, 'strongestTargetResponse')}: ${targetFeedback.text}',
+                  ),
+                ],
+                if (request.preferredClubId != null &&
+                    request.preferredClubId != targetFeedback?.clubId) ...[
+                  const SizedBox(height: 7),
+                  Text(
+                    _preferredTransferFeedback(
+                      locale: locale,
+                      request: request,
+                      targetIds: targetIds,
+                      market: market,
+                      world: world,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
           const SizedBox(height: 12),
         ],
         if (rejected.isNotEmpty) ...[
@@ -2100,6 +3011,62 @@ class _OffseasonView extends StatelessWidget {
     if (confirm == true) onAccept(negotiated);
   }
 }
+
+String _preferredTransferFeedback({
+  required String locale,
+  required TransferRequest request,
+  required Set<String> targetIds,
+  required List<TransferInterest> market,
+  required WorldDefinition world,
+}) {
+  final clubId = request.preferredClubId!;
+  final clubName =
+      world.clubs
+          .where((club) => club.id == clubId)
+          .map((club) => club.name)
+          .firstOrNull ??
+      clubId;
+  if (!targetIds.contains(clubId)) {
+    return '$clubName — ${uiCopy(locale, 'preferredClubMovedLeague')}';
+  }
+  final interest = market.where((entry) => entry.clubId == clubId).firstOrNull;
+  if (interest == null) return clubName;
+  return '$clubName — ${localizedTransferReason(locale, interest.reason)}';
+}
+
+({String clubId, String text})? _strongestTargetRejection({
+  required String locale,
+  required Set<String> targetIds,
+  required List<TransferInterest> market,
+  required WorldDefinition world,
+}) {
+  final rejection = market
+      .where((entry) => targetIds.contains(entry.clubId) && !entry.accepted)
+      .firstOrNull;
+  if (rejection == null) return null;
+  final clubName = world.clubs
+      .where((club) => club.id == rejection.clubId)
+      .map((club) => club.name)
+      .firstOrNull;
+  return (
+    clubId: rejection.clubId,
+    text:
+        '${clubName ?? rejection.clubId} — ${localizedTransferReason(locale, rejection.reason)}',
+  );
+}
+
+String _nationalFinishLabel(String finish) => switch (finish) {
+  'champion' => 'Champions',
+  'runnerUp' => 'Runners-up',
+  'semifinal' => 'Semifinal',
+  'quarterfinal' => 'Quarterfinal',
+  'roundOf16' => 'Round of 16',
+  'groupStage' => 'Group stage',
+  'missedSquad' => 'Qualified · squad threshold not met',
+  'declinedCallup' => 'Qualified · call-up declined',
+  'didNotQualify' => 'Did not qualify',
+  _ => finish,
+};
 
 class _LegacyView extends StatelessWidget {
   const _LegacyView({super.key, required this.career});
@@ -2280,38 +3247,6 @@ class _RoundStat extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _DeltaChip extends StatelessWidget {
-  const _DeltaChip({
-    required this.label,
-    required this.value,
-    this.money = false,
-  });
-
-  final String label;
-  final int value;
-  final bool money;
-
-  @override
-  Widget build(BuildContext context) {
-    final positive = value >= 0;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-      decoration: BoxDecoration(
-        color: ElevenwardColors.panelLight,
-        borderRadius: BorderRadius.circular(9),
-      ),
-      child: Text(
-        '$label  ${positive ? '+' : ''}${money ? '£' : ''}$value',
-        style: TextStyle(
-          color: positive ? ElevenwardColors.cream : ElevenwardColors.coral,
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-        ),
       ),
     );
   }
@@ -2525,77 +3460,4 @@ String _attributeName(PlayerAttribute attribute, String locale) {
     ],
   };
   return names[locale]![attribute.index];
-}
-
-String _attributeDescription(
-  PlayerAttribute attribute,
-  PositionFamily position,
-  String locale,
-) {
-  const descriptions = <String, List<String>>{
-    'en': [
-      'Acceleration and recovery runs',
-      'Control when space disappears',
-      'Weight and vision of distribution',
-      'Quality in decisive scoring actions',
-      'Reading, positioning, and challenges',
-      'Power through physical contact',
-      'Repeat intensity late in matches',
-      'Clear decisions under pressure',
-    ],
-    'es': [
-      'Aceleración y carreras de recuperación',
-      'Control cuando desaparece el espacio',
-      'Precisión y visión en la distribución',
-      'Calidad en acciones decisivas de gol',
-      'Lectura, posición y entradas',
-      'Potencia en el contacto físico',
-      'Intensidad al final del partido',
-      'Decisiones claras bajo presión',
-    ],
-    'pt-BR': [
-      'Aceleração e corridas de recuperação',
-      'Controle quando o espaço desaparece',
-      'Peso e visão na distribuição',
-      'Qualidade nas ações decisivas de gol',
-      'Leitura, posicionamento e desarmes',
-      'Potência no contato físico',
-      'Intensidade no fim da partida',
-      'Decisões claras sob pressão',
-    ],
-    'fr': [
-      'Accélération et courses de repli',
-      'Contrôle quand l’espace disparaît',
-      'Dosage et vision dans la distribution',
-      'Qualité dans les gestes décisifs',
-      'Lecture, placement et duels',
-      'Puissance dans le contact',
-      'Intensité répétée en fin de match',
-      'Décisions lucides sous pression',
-    ],
-  };
-  final base = descriptions[locale]![attribute.index];
-  return '$base · ${localizedPosition(locale, position.name)}';
-}
-
-String _localizedMatchHeadline(
-  String locale,
-  String playerName,
-  bool succeeded,
-) {
-  final values = succeeded
-      ? {
-          'en': '$playerName made the moment count under the lights.',
-          'es': '$playerName aprovechó el momento bajo los focos.',
-          'pt-BR': '$playerName aproveitou o momento sob os refletores.',
-          'fr': '$playerName a saisi son moment sous les projecteurs.',
-        }
-      : {
-          'en': '$playerName could not force the moment under the lights.',
-          'es': '$playerName no pudo forzar el momento bajo los focos.',
-          'pt-BR':
-              '$playerName não conseguiu forçar o momento sob os refletores.',
-          'fr': '$playerName n’a pas pu forcer le moment sous les projecteurs.',
-        };
-  return values[locale] ?? values['en']!;
 }

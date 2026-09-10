@@ -40,116 +40,133 @@ final class _OnboardingScreenState extends State<OnboardingScreen> {
       ),
       (
         icon: Icons.flare_rounded,
-        title: uiCopy(locale, 'onboardingSpotlightTitle'),
-        body: uiCopy(locale, 'onboardingSpotlightBody'),
-      ),
-      (
-        icon: Icons.cloud_done_outlined,
-        title: uiCopy(locale, 'onboardingCloudTitle'),
-        body: uiCopy(locale, 'onboardingCloudBody'),
+        title: uiCopy(locale, 'onboardingLifeTitle'),
+        body: uiCopy(locale, 'onboardingLifeBody'),
       ),
     ];
     return Scaffold(
-      body: SafeArea(
-        child: Column(
-          children: [
-            Align(
-              alignment: AlignmentDirectional.centerEnd,
-              child: TextButton(
-                onPressed: _finishing ? null : _finish,
-                child: Text(uiCopy(locale, 'skip')),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          Image.asset(
+            'assets/visual/stadium-hero.png',
+            fit: BoxFit.cover,
+            excludeFromSemantics: true,
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xB307110C), ElevenwardColors.ink],
               ),
             ),
-            Expanded(
-              child: PageView.builder(
-                controller: _pageController,
-                itemCount: pages.length,
-                onPageChanged: (value) => setState(() => _page = value),
-                itemBuilder: (context, index) {
-                  final item = pages[index];
-                  return Semantics(
-                    namesRoute: true,
-                    label: '${index + 1} of ${pages.length}',
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 24,
-                      ),
-                      child: Column(
+          ),
+          SafeArea(
+            child: Column(
+              children: [
+                Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: TextButton(
+                    onPressed: _finishing ? null : _finish,
+                    child: Text(uiCopy(locale, 'skip')),
+                  ),
+                ),
+                Expanded(
+                  child: PageView.builder(
+                    controller: _pageController,
+                    itemCount: pages.length,
+                    onPageChanged: (value) => setState(() => _page = value),
+                    itemBuilder: (context, index) {
+                      final item = pages[index];
+                      return Semantics(
+                        namesRoute: true,
+                        label:
+                            '${uiCopy(locale, 'step')} ${index + 1} ${uiCopy(locale, 'of')} ${pages.length}',
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 24,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 88,
+                                height: 88,
+                                decoration: BoxDecoration(
+                                  color: ElevenwardColors.grassDark,
+                                  borderRadius: BorderRadius.circular(28),
+                                ),
+                                child: Icon(
+                                  item.icon,
+                                  size: 42,
+                                  color: ElevenwardColors.grass,
+                                ),
+                              ),
+                              const SizedBox(height: 28),
+                              Text(
+                                item.title,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.displaySmall,
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                item.body,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: ElevenwardColors.muted,
+                                  fontSize: 17,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Container(
-                            width: 88,
-                            height: 88,
+                        children: List.generate(
+                          pages.length,
+                          (index) => Container(
+                            width: index == _page ? 24 : 8,
+                            height: 8,
+                            margin: const EdgeInsets.symmetric(horizontal: 3),
                             decoration: BoxDecoration(
-                              color: ElevenwardColors.grassDark,
-                              borderRadius: BorderRadius.circular(28),
-                            ),
-                            child: Icon(
-                              item.icon,
-                              size: 42,
-                              color: ElevenwardColors.grass,
+                              color: index == _page
+                                  ? ElevenwardColors.grass
+                                  : ElevenwardColors.line,
+                              borderRadius: BorderRadius.circular(4),
                             ),
                           ),
-                          const SizedBox(height: 28),
-                          Text(
-                            item.title,
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.displaySmall,
-                          ),
-                          const SizedBox(height: 14),
-                          Text(
-                            item.body,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: ElevenwardColors.muted,
-                              fontSize: 17,
-                              height: 1.5,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(
-                      pages.length,
-                      (index) => Container(
-                        width: index == _page ? 24 : 8,
-                        height: 8,
-                        margin: const EdgeInsets.symmetric(horizontal: 3),
-                        decoration: BoxDecoration(
-                          color: index == _page
-                              ? ElevenwardColors.grass
-                              : ElevenwardColors.line,
-                          borderRadius: BorderRadius.circular(4),
                         ),
                       ),
-                    ),
+                      const SizedBox(height: 22),
+                      FilledButton(
+                        onPressed: _finishing
+                            ? null
+                            : () => _next(pages.length),
+                        child: Text(
+                          _page == pages.length - 1
+                              ? uiCopy(locale, 'startCareer')
+                              : uiCopy(locale, 'continue'),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 22),
-                  FilledButton(
-                    onPressed: _finishing ? null : () => _next(pages.length),
-                    child: Text(
-                      _page == pages.length - 1
-                          ? uiCopy(locale, 'startCareer')
-                          : uiCopy(locale, 'continue'),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

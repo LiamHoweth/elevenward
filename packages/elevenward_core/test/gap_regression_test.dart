@@ -261,17 +261,14 @@ void main() {
         );
     var snapshot = CareerSnapshot.newCareer(seed: 919).copyWith(
       season: 4,
+      week: 18,
+      phase: CareerPhase.internationalCallup,
       world: worldState,
       player: strongPlayer,
     );
     final tournament =
-        snapshot.world.competitions['major-national-tournament']!;
-    final firstNationalFixture = tournament.fixtures.firstWhere(
-      (fixture) =>
-          fixture.homeId == snapshot.player.nationalTeamId ||
-          fixture.awayId == snapshot.player.nationalTeamId,
-    );
-    snapshot = snapshot.copyWith(week: firstNationalFixture.matchweek);
+        snapshot.world.competitions['world-nations-championship']!;
+    expect(tournament.participantIds, contains(snapshot.player.nationalTeamId));
 
     expect(engine.hasNationalTeamInvitation(snapshot), isTrue);
     final declined = engine.decideNationalTeamCallUp(
@@ -279,9 +276,10 @@ void main() {
       accept: false,
       updatedAt: now,
     );
+    expect(declined.phase, CareerPhase.offseason);
     expect(
-      world.opponentFor(declined).competitionKind,
-      isNot(CompetitionKind.nationalTournament),
+      declined.world.competitions['world-nations-championship']!.isComplete,
+      isTrue,
     );
 
     snapshot = engine.decideNationalTeamCallUp(
@@ -290,6 +288,7 @@ void main() {
       updatedAt: now,
     );
     expect(engine.hasNationalTeamInvitation(snapshot), isFalse);
+    expect(snapshot.phase, CareerPhase.internationalTournament);
     final opponent = world.opponentFor(snapshot);
     expect(opponent.competitionKind, CompetitionKind.nationalTournament);
     final result = weekly.advance(

@@ -1,5 +1,6 @@
 import '../model/career_progress.dart';
 import '../model/career_snapshot.dart';
+import '../model/career_types.dart';
 import '../model/weekly_models.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
@@ -31,19 +32,35 @@ final class WorldSimulator {
     final competitions = state.competitions.isEmpty
         ? _newCompetitions(state, world, snapshot.season)
         : state.competitions;
+    final expandedWorld = _isExpandedWorld(world);
+    final isNationalPostseason =
+        snapshot.phase == CareerPhase.internationalTournament;
+    final calendarWeek = isNationalPostseason
+        ? snapshot.nationalTeam.tournamentMatchday
+        : snapshot.week;
     final selectedForNational =
         snapshot.nationalTeam.acceptedFor(snapshot.season);
     final scheduled = competitions.values
         .expand(
           (competition) => competition.fixtures.where(
             (fixture) =>
-                fixture.matchweek == snapshot.week &&
+                fixture.matchweek == calendarWeek &&
                 !fixture.isPlayed &&
-                (fixture.homeId == snapshot.clubId ||
-                    fixture.awayId == snapshot.clubId ||
-                    (selectedForNational &&
+                (isNationalPostseason
+                    ? competition.kind == CompetitionKind.nationalTournament &&
+                        selectedForNational &&
                         (fixture.homeId == snapshot.player.nationalTeamId ||
-                            fixture.awayId == snapshot.player.nationalTeamId))),
+                            fixture.awayId == snapshot.player.nationalTeamId)
+                    : (competition.kind != CompetitionKind.nationalTournament &&
+                            (fixture.homeId == snapshot.clubId ||
+                                fixture.awayId == snapshot.clubId)) ||
+                        (!expandedWorld &&
+                            selectedForNational &&
+                            competition.kind ==
+                                CompetitionKind.nationalTournament &&
+                            (fixture.homeId == snapshot.player.nationalTeamId ||
+                                fixture.awayId ==
+                                    snapshot.player.nationalTeamId))),
           ),
         )
         .toList()
@@ -90,6 +107,11 @@ final class WorldSimulator {
         competitionKind: competition.kind,
       );
     }
+    if (isNationalPostseason) {
+      throw StateError(
+        'The player has no remaining World Nations Championship fixture.',
+      );
+    }
     final leagueId = state.leagueIdForClub(snapshot.clubId);
     final schedule = _schedule(
       leagueId,
@@ -130,6 +152,9 @@ final class WorldSimulator {
       for (final league in state.leagueRecords.entries)
         league.key: Map<String, ClubSeasonRecord>.from(league.value),
     };
+    final playerLeagueFixtures = List<Fixture>.from(
+      state.playerLeagueFixtures,
+    );
     final quality = {for (final club in world.clubs) club.id: club.quality};
     final opponent = opponentFor(snapshot, definition: world);
 
@@ -158,6 +183,12 @@ final class WorldSimulator {
           homeGoals = score.$1;
           awayGoals = score.$2;
         }
+        if (opponent.competitionKind == CompetitionKind.league &&
+            entry.key == opponent.competitionId &&
+            (fixture.homeId == snapshot.clubId ||
+                fixture.awayId == snapshot.clubId)) {
+          playerLeagueFixtures.add(fixture.withScore(homeGoals, awayGoals));
+        }
         final table = records[entry.key]!;
         table[fixture.homeId] =
             table[fixture.homeId]!.record(homeGoals, awayGoals);
@@ -170,19 +201,138 @@ final class WorldSimulator {
         : state.competitions;
     final advancedCompetitions = <String, CompetitionProgress>{};
     for (final entry in competitions.entries) {
-      advancedCompetitions[entry.key] = _advanceCompetition(
-        entry.value,
-        snapshot: snapshot,
-        activeCompetitionId: opponent.competitionId,
-        playerHomeScore: playerHomeScore,
-        playerAwayScore: playerAwayScore,
-        world: world,
-      );
+      advancedCompetitions[entry.key] = _isExpandedWorld(world) &&
+              entry.value.kind == CompetitionKind.nationalTournament
+          ? entry.value
+          : _advanceCompetition(
+              entry.value,
+              snapshot: snapshot,
+              activeCompetitionId: opponent.competitionId,
+              playerHomeScore: playerHomeScore,
+              playerAwayScore: playerAwayScore,
+              world: world,
+            );
     }
     return state.copyWith(
       leagueRecords: records,
+      playerLeagueFixtures: List.unmodifiable(playerLeagueFixtures),
       competitions: Map.unmodifiable(advancedCompetitions),
     );
+  }
+
+  CareerWorldState advanceNationalTournamentMatch({
+    required CareerSnapshot snapshot,
+    required int playerHomeScore,
+    required int playerAwayScore,
+    WorldDefinition? definition,
+  }) {
+    final world = definition ?? buildLaunchWorld();
+    const competitionId = 'world-nations-championship';
+    final current = snapshot.world.competitions[competitionId];
+    if (current == null || current.isComplete) return snapshot.world;
+    final matchday = snapshot.nationalTeam.tournamentMatchday;
+    final tournamentSnapshot = snapshot.copyWith(week: matchday);
+    final advanced = _advanceCompetition(
+      current,
+      snapshot: tournamentSnapshot,
+      activeCompetitionId: competitionId,
+      playerHomeScore: playerHomeScore,
+      playerAwayScore: playerAwayScore,
+      world: world,
+    );
+    var next = snapshot.world.copyWith(
+      competitions: Map.unmodifiable({
+        ...snapshot.world.competitions,
+        competitionId: advanced,
+      }),
+    );
+    final playerTeamId = snapshot.player.nationalTeamId;
+    final hasFuturePlayerFixture = advanced.fixtures.any(
+      (fixture) =>
+          !fixture.isPlayed &&
+          (fixture.homeId == playerTeamId || fixture.awayId == playerTeamId),
+    );
+    if (advanced.isComplete || !hasFuturePlayerFixture) {
+      next = completeNationalTournament(
+        snapshot: snapshot.copyWith(world: next),
+        definition: world,
+      );
+    }
+    return next;
+  }
+
+  CareerWorldState completeNationalTournament({
+    required CareerSnapshot snapshot,
+    WorldDefinition? definition,
+    String? playerFinishOverride,
+  }) {
+    final world = definition ?? buildLaunchWorld();
+    const competitionId = 'world-nations-championship';
+    var progress = snapshot.world.competitions[competitionId];
+    if (progress == null) return snapshot.world;
+    for (var matchday = 1; matchday <= 7 && !progress!.isComplete; matchday++) {
+      if (!progress.fixtures.any(
+        (fixture) => fixture.matchweek == matchday && !fixture.isPlayed,
+      )) {
+        continue;
+      }
+      progress = _advanceCompetition(
+        progress,
+        snapshot: snapshot.copyWith(week: matchday),
+        activeCompetitionId: null,
+        playerHomeScore: 0,
+        playerAwayScore: 0,
+        world: world,
+      );
+    }
+    final winner = progress!.winnerId;
+    if (winner == null) {
+      throw StateError('The World Nations Championship did not finish.');
+    }
+    final history = snapshot.world.nationalTournamentHistory
+        .where((entry) => entry.season != snapshot.season)
+        .toList(growable: true)
+      ..add(
+        NationalTournamentHistoryEntry(
+          season: snapshot.season,
+          winnerId: winner,
+          playerTeamId: snapshot.player.nationalTeamId,
+          playerFinish: playerFinishOverride ??
+              _nationalFinish(progress, snapshot.player.nationalTeamId),
+          playerAppearances: snapshot.nationalTeam.cycleAppearances,
+        ),
+      );
+    return snapshot.world.copyWith(
+      nationalTournamentWinner: winner,
+      nationalTournamentHistory: List.unmodifiable(history),
+      competitions: Map.unmodifiable({
+        ...snapshot.world.competitions,
+        competitionId: progress,
+      }),
+    );
+  }
+
+  String _nationalFinish(CompetitionProgress progress, String teamId) {
+    if (!progress.participantIds.contains(teamId)) return 'didNotQualify';
+    if (progress.winnerId == teamId) return 'champion';
+    final played = progress.fixtures
+        .where(
+          (fixture) =>
+              fixture.isPlayed &&
+              (fixture.homeId == teamId || fixture.awayId == teamId),
+        )
+        .toList(growable: false);
+    final last = played.fold<int>(
+        0,
+        (value, fixture) =>
+            fixture.matchweek > value ? fixture.matchweek : value);
+    return switch (last) {
+      7 => 'runnerUp',
+      6 => 'semifinal',
+      5 => 'quarterfinal',
+      4 => 'roundOf16',
+      _ => 'groupStage',
+    };
   }
 
   CareerWorldState beginNextSeason(
@@ -196,9 +346,11 @@ final class WorldSimulator {
         entry.key: List<String>.from(entry.value),
     };
 
-    for (final nation in FootballNation.values) {
-      final nationLeagues =
-          world.leagues.where((league) => league.nation == nation);
+    for (final country
+        in world.countries.where((country) => country.hasLeague)) {
+      final nationLeagues = world.leagues.where(
+        (league) => league.countryId == country.id,
+      );
       final firstId = nationLeagues
           .firstWhere((league) => league.division == DivisionLevel.first)
           .id;
@@ -229,8 +381,23 @@ final class WorldSimulator {
     };
     final internationalWinner =
         completed[world.internationalClubCompetition.id]?.winnerId;
-    final nationalWinner = completed['major-national-tournament']?.winnerId;
+    final nationalWinner = completed[_isExpandedWorld(world)
+            ? 'world-nations-championship'
+            : 'major-national-tournament']
+        ?.winnerId;
     final nextSeason = state.season + 1;
+    final qualificationResult =
+        _isExpandedWorld(world) && isMajorNationalTournamentSeason(nextSeason)
+            ? simulateNationalQualification(world, nextSeason)
+            : null;
+    final qualification = qualificationResult == null
+        ? state.nationalQualification
+        : NationalQualificationState(
+            cycleSeason: nextSeason,
+            tables: qualificationResult.tables,
+            fixtures: qualificationResult.fixtures,
+            qualifiedTeamIds: qualificationResult.qualifiedTeamIds,
+          );
     return CareerWorldState(
       season: nextSeason,
       leagueParticipants: {
@@ -246,11 +413,14 @@ final class WorldSimulator {
       domesticCupWinners: Map.unmodifiable(cupWinners),
       internationalClubWinner: internationalWinner,
       nationalTournamentWinner: nationalWinner,
+      nationalQualification: qualification,
+      nationalTournamentHistory: state.nationalTournamentHistory,
       competitions: _newCompetitions(
         state,
         world,
         nextSeason,
         leagueParticipants: participants,
+        nationalParticipantIds: qualificationResult?.qualifiedTeamIds,
       ),
     );
   }
@@ -260,6 +430,7 @@ final class WorldSimulator {
     WorldDefinition world,
     int season, {
     Map<String, List<String>>? leagueParticipants,
+    List<String>? nationalParticipantIds,
   }) {
     final competitions = <String, CompetitionProgress>{};
     for (final cup in world.domesticCups) {
@@ -271,35 +442,58 @@ final class WorldSimulator {
       );
     }
     final internationalIds = <String>[];
-    for (final nation in FootballNation.values) {
+    final expandedWorld = _isExpandedWorld(world);
+    final rankedCountries =
+        world.countries.where((country) => country.hasLeague).toList()
+          ..sort(
+            (left, right) =>
+                (left.leagueRank ?? 40).compareTo(right.leagueRank ?? 40),
+          );
+    for (final country in rankedCountries) {
       final league = world.leagues.firstWhere(
-        (item) => item.nation == nation && item.division == DivisionLevel.first,
+        (item) =>
+            item.countryId == country.id &&
+            item.division == DivisionLevel.first,
       );
       if (state.leagueRecords[league.id]?.values.any(
             (record) => record.played > 0,
           ) ??
           false) {
-        internationalIds.addAll(
-          state.table(league.id).take(2).map((row) => row.clubId),
-        );
+        final table = state.table(league.id);
+        internationalIds.add(table.first.clubId);
+        if (!expandedWorld || (country.leagueRank ?? 99) <= 6) {
+          internationalIds.add(table[1].clubId);
+        }
       } else {
         final participants = leagueParticipants?[league.id] ?? league.clubIds;
-        internationalIds.addAll(participants.take(2));
+        internationalIds.add(participants.first);
+        if (!expandedWorld || (country.leagueRank ?? 99) <= 6) {
+          internationalIds.add(participants[1]);
+        }
       }
     }
     competitions[world.internationalClubCompetition.id] = CompetitionProgress(
       id: world.internationalClubCompetition.id,
       kind: CompetitionKind.internationalClub,
       participantIds: List.unmodifiable(internationalIds),
-      fixtures: buildInternationalGroupSchedule(internationalIds),
+      fixtures: expandedWorld
+          ? buildInternationalGroupSchedule(internationalIds)
+          : buildLegacyInternationalGroupSchedule(internationalIds),
     );
     if (isMajorNationalTournamentSeason(season)) {
-      final ids = world.nationalTeams.map((team) => team.id).toList();
-      competitions['major-national-tournament'] = CompetitionProgress(
-        id: 'major-national-tournament',
+      final ids = expandedWorld
+          ? nationalParticipantIds ?? qualifyingNationalTeams(world, season)
+          : world.nationalTeams.map((team) => team.id).toList(growable: false);
+      final competitionId = expandedWorld
+          ? 'world-nations-championship'
+          : 'major-national-tournament';
+      competitions[competitionId] = CompetitionProgress(
+        id: competitionId,
         kind: CompetitionKind.nationalTournament,
         participantIds: List.unmodifiable(ids),
-        fixtures: buildNationalGroupSchedule(ids),
+        fixtures: expandedWorld
+            ? buildNationalGroupSchedule(ids)
+            : buildLegacyNationalGroupSchedule(ids),
       );
     }
     return Map.unmodifiable(competitions);
@@ -375,8 +569,10 @@ final class WorldSimulator {
         CompetitionKind.domesticCup => true,
         CompetitionKind.internationalClub =>
           progress.stage == 0 ? week == 11 : true,
-        CompetitionKind.nationalTournament =>
-          progress.stage == 0 ? week == 9 : true,
+        CompetitionKind.nationalTournament => progress.stage == 0
+            ? week == (progress.participantIds.length == 24 ? 9 : 3)
+            : true,
+        CompetitionKind.nationalQualifier => true,
         CompetitionKind.league => false,
       };
 
@@ -393,8 +589,7 @@ final class WorldSimulator {
       ];
     } else if (progress.stage == 0 &&
         progress.kind != CompetitionKind.domesticCup) {
-      final groupCount =
-          progress.kind == CompetitionKind.internationalClub ? 3 : 6;
+      final groupCount = progress.participantIds.length ~/ 4;
       entrants = _groupQualifiers(progress, fixtures, groupCount);
     } else {
       entrants = _winners(
@@ -410,13 +605,14 @@ final class WorldSimulator {
     }
     final nextWeek = switch (progress.kind) {
       CompetitionKind.domesticCup => const [6, 10, 14, 18][progress.stage],
-      CompetitionKind.internationalClub => const [13, 15, 17][progress.stage],
-      CompetitionKind.nationalTournament => const [
-          12,
-          14,
-          16,
-          18
-        ][progress.stage],
+      CompetitionKind.internationalClub => progress.participantIds.length == 12
+          ? const [13, 15, 17][progress.stage]
+          : const [12, 14, 16, 18][progress.stage],
+      CompetitionKind.nationalTournament => progress.participantIds.length == 24
+          ? const [12, 14, 16, 18][progress.stage]
+          : const [4, 5, 6, 7][progress.stage],
+      CompetitionKind.nationalQualifier =>
+        throw StateError('Qualifiers are simulated before the tournament.'),
       CompetitionKind.league => throw StateError('League is not a knockout.'),
     };
     final round = progress.stage + 1;
@@ -457,15 +653,23 @@ final class WorldSimulator {
       automatic.addAll(table.take(2).map((row) => row.clubId));
       thirds.add(table[2]);
     }
+    final target = progress.participantIds.length == 12
+        ? 8
+        : progress.participantIds.length == 24
+            ? 16
+            : automatic.length;
     thirds.sort((left, right) {
       final points = right.points.compareTo(left.points);
       if (points != 0) return points;
       final difference = right.goalDifference.compareTo(left.goalDifference);
       if (difference != 0) return difference;
-      return left.clubId.compareTo(right.clubId);
+      final goals = right.goalsFor.compareTo(left.goalsFor);
+      return goals != 0 ? goals : left.clubId.compareTo(right.clubId);
     });
-    final extra = progress.kind == CompetitionKind.internationalClub ? 2 : 4;
-    return [...automatic, ...thirds.take(extra).map((row) => row.clubId)];
+    return [
+      ...automatic,
+      ...thirds.take(target - automatic.length).map((row) => row.clubId),
+    ];
   }
 
   List<String> _winners(Iterable<Fixture> fixtures) => fixtures
@@ -508,4 +712,7 @@ final class WorldSimulator {
     }
     return hash;
   }
+
+  bool _isExpandedWorld(WorldDefinition world) =>
+      world.countries.where((country) => country.hasLeague).length == 26;
 }

@@ -19,5 +19,6 @@ void main() {
     expect(
         first.nationalTeamDecisionCounts.values, everyElement(greaterThan(0)));
     expect(first.leagueMovementCounts['unchanged'], greaterThan(0));
+    expect(first.rewardProfileCounts.values, everyElement(greaterThan(0)));
   });
 }

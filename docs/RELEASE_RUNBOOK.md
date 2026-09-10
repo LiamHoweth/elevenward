@@ -117,13 +117,14 @@ Backup retention, cross-region recovery and signing-key rotation remain release 
 
 ## Purchases and account lifecycle
 
-Permanent products: `com.howethstudio.elevenward.extra_slots` →
-`extra_career_slots`; `com.howethstudio.elevenward.supporter_pack` → `supporter_pack`.
-Prices come from the storefront SDK. Missing prices show a store-price placeholder,
-never an invented currency amount. Verify purchase UI availability per region.
+The four permanent products, legacy migration, dashboard mapping, restore,
+refund/revocation, account-switch and webhook procedures are defined in
+[GAMEPASS_OPERATIONS.md](GAMEPASS_OPERATIONS.md). Missing storefront prices show
+an unavailable state, never an invented amount.
 
 Current RevenueCat verification mode is **informational**, not enforced. Rationale:
-these are local cosmetics/slot capacity, not valuable competitive prizes. Local
+these are offline career modifiers, cosmetics and slot capacity without valuable
+leaderboard prizes. Local
 cache tampering cannot be made impossible on modified devices. This is an explicit
 pre-alpha implementation choice, not approved production fraud policy. Before
 launch, review whether enforced verification is compatible with offline use and

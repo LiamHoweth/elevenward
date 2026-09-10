@@ -38,9 +38,11 @@ void main() {
       final publicKey = await key.extractPublicKey();
       final body = File(ContentService.bundledAsset).readAsStringSync();
       final bytes = utf8.encode(body);
+      final releaseVersion =
+          ((jsonDecode(body) as Map)['metadata'] as Map)['releaseVersion'];
       final signature = await algorithm.sign(bytes, keyPair: key);
       final manifest = <String, Object?>{
-        'releaseVersion': '2026.2.0',
+        'releaseVersion': releaseVersion,
         'signatureAlgorithm': 'Ed25519',
         'signature': base64Url.encode(signature.bytes),
         'checksum': 'sha256:${sha256.convert(bytes)}',

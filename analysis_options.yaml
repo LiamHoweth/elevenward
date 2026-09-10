@@ -14,6 +14,7 @@ analyzer:
     - build/**
     - android/**
     - ios/**
+    - packages/purchases_flutter_compat/**
 
 linter:
   # The lint rules applied to this project can be customized in the

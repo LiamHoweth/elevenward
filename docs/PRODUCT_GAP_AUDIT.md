@@ -43,25 +43,26 @@ release revision.
 | Surface | Local result |
 | --- | --- |
 | Flutter analysis | Clean |
-| Flutter tests | 27 passed, including exact content pins, recovery isolation, entitlement preservation, localization and competition UI |
+| Flutter tests | 84 passed, including exact content pins, recovery isolation, transfer-request flows, all entitlement combinations, Shop states, localization, match recap and portrait viewport coverage |
 | Pure-Dart core analysis | Clean |
-| Pure-Dart core tests | 39 passed |
-| Elevenward/Football Era API tests | 36 passed |
+| Pure-Dart core tests | 79 passed, including schema-12 migration, transfer-request validation/prioritization/clearing, and unchanged no-request offer ordering |
+| Elevenward/Football Era API tests | 40 passed, including exact product mapping and bounded boosted-leaderboard evidence |
 | Site and API dependency audits | 0 reported vulnerabilities |
 | Howeth Studio website | ESLint clean; Next.js static production build generated 41 routes, including same-domain sitemap and robots metadata |
 | Website visual smoke | Localized press routes render with landmarks, skip links, localized navigation and all downloads—including original launch artwork—exposed to accessibility APIs |
-| Content bundle | `2026.2.0`, executable rules `2026.2`; 120 clubs, 24 national teams, 160 situations, 200 events, 120 lifestyle items; canonical game/API fixture hashes match |
+| Content bundle | `2026.2.0`, executable rules `2026.3`; 120 clubs, 24 national teams, 160 situations, 200 events, 120 lifestyle items; API fixture regeneration remains an external-repository release step |
 | Static release guards | Android/iOS release assets, non-debug Android signing configuration, content bundle and iOS export options pass |
-| Native smoke builds | Android debug APK and unsigned iOS simulator app passed locally; signed artifacts still require protected credentials |
-| Production-engine simulation | [100,000-career aggregate](../artifacts/verification/production-100000.json): 32,178,240 weeks across 20 contiguous real-engine shards, zero failures, SHA-256 `b6f1a8ca43dc5591484d26e8bc9fdf432e99ca27b9fc7882e48e369424183ee9`; all required positions, archetypes, difficulties, starting leagues, retirement seasons, competitions, transfer categories, national decisions and league movements |
+| Native smoke builds | Android debug APK and unsigned iOS device app passed locally; signed artifacts still require protected credentials |
+| Production-engine simulation | Existing [100,000-career aggregate](../artifacts/verification/production-100000.json): 32,178,240 weeks across 20 real-engine shards and zero failures. A new 100-career smoke passed 28,800 weeks with 25 careers each under standard, VIP, focused-double and All-Access profiles (`cf5b0f6c`); the updated hosted 100k profile-aware gate remains outstanding. |
 | Production routes, checked 2026-09-05 | Product page, privacy page and API health endpoint still return HTTP 404; local work is not deployed |
 
 The same scheduled workflow runs 5,000 real careers per shard and refuses the
-release gate unless all 100,000 careers and coverage dimensions merge cleanly.
-That strict merge now passes locally on the current working tree. The game
-repository still has no configured remote, so a hosted run on an intentional,
-pushed release revision remains outstanding; local evidence is not substituted
-for that supply-chain/reproducibility gate.
+release gate unless all 100,000 careers, reward profiles and coverage dimensions
+merge cleanly. The pre-gamepass 100k artifact remains historical evidence; rerun
+all shards with the new four-profile gate. The game repository still has no
+configured remote, so a hosted run on an intentional, pushed release revision
+remains outstanding; local evidence is not substituted for that
+supply-chain/reproducibility gate.
 
 ## Original brief coverage
 
@@ -70,16 +71,16 @@ for that supply-chain/reproducibility gate.
 | Distinct Football Era sibling | Standalone Flutter/pure-Dart product, original fictional data and separate Elevenward site/API namespaces | Formal owned-IP inventory plus golden behavior comparisons against the supplied Football Era baseline |
 | Age 17 through retirement, maximum 20 seasons, legacy verdict | Implemented | Balance, native-copy and full-career device review |
 | Four positions, 12 archetypes, eight explainable attributes | Implemented | 100k balance certification and richer archetype tuning |
-| Weekly focus → matchup → spotlight → receipt → life event → world | Implemented and persisted | Physical-device UX/performance qualification |
-| Explainable outcomes | Selection, odds, seeded roll, match/transfer/sponsor receipts and localized factor labels | Production proof that every displayed reason stays aligned after future balance changes |
+| Weekly focus → pregame matchup → spotlight → optional life event → next week | Implemented and persisted; completed scores remain in World | Physical-device UX/performance qualification |
+| Explainable outcomes | Selection and localized odds factors are previewed before commitment; seeded result details remain deterministic in the engine | Production proof that every displayed reason stays aligned after future balance changes |
 | Six countries, two divisions, promotion/relegation and schedules | 120 original clubs, 12 leagues, double round robins and two-up/two-down | Final club identity/art/editorial review |
 | Domestic cups | Persisted rounds, fixtures, results, player participation, extra-time/penalty decisions, knockout bracket and permanent honors history | Native-language editorial review and physical-device QA |
 | International club competition | Dynamic qualification, groups, knockouts, persisted results, qualification rules, tie-break explanation and bracket UI | Native-language editorial review and physical-device QA |
 | National teams and four-year tournament | 24 teams, explicit accept/decline call-up state, caps/goals/assists, eligibility, persisted matches and tournament | Balance, native-copy and physical-device review; full squad management was not required by the brief |
 | Relationships and off-pitch systems | Manager, teammates, agent, sponsors, press, family, reputation, wellness and community affect weekly outcomes | More authored multi-season arcs and balance review |
 | Lifestyle | Ownership/equipment, category cooldowns, ongoing category effects and visible cosmetic previews | Final item art and long-career economy review |
-| Contracts and transfers | Expiry, renewal, role satisfaction, bounded negotiation, reasons and guaranteed free-agency fallbacks | Balance/native-copy review; loans and a formal transfer window were not required by the brief |
-| Monetization constraints | Two free slots, five-slot entitlement, Supporter Pack, storefront prices, no boosts/random rewards | Real products, store configuration and sandbox qualification |
+| Contracts and transfers | Expiry, renewal, role satisfaction, bounded negotiation, reasons, guaranteed free-agency fallbacks, and player-requested next-offseason moves by league/optional club | Balance/native-copy review; loans, midseason moves, and a formal transfer window were not required by the brief |
+| Monetization constraints | Four permanent passes, exact 1.5×/2×/3× development and positive-income profiles, five-slot/cosmetic benefits, localized storefront prices, no random rewards | Real products, store configuration and sandbox qualification |
 | Offline plus optional account/cloud | SQLite snapshot+journal, secure token storage, explicit progress, remote-only download and conflict preservation | Production providers/API and multi-device/outage drills |
 | Prize-free leaderboards | Opt-in, generated aliases, plausibility checks and partitions by position/difficulty/rules | Production abuse monitoring and integrity review |
 | Signed remote content | Immutable bundles, validation, Ed25519 checks, exact career-version pins, retained verified releases, client/rules compatibility, cache revalidation, publish and rollback | Production keys/bucket and an observed rollback drill |
@@ -95,17 +96,20 @@ for that supply-chain/reproducibility gate.
 - [x] Persist competition participants, fixtures, stages, results and winners.
 - [x] Simulate domestic cups and the 12-club international competition through
   real world state instead of selecting a winner from a threshold.
-- [x] Record regulation, extra-time and penalty decisions for knockout receipts.
+- [x] Record regulation, extra-time and penalty decisions for knockout fixtures.
 - [x] Add a durable national-team call-up offer with accept/decline, caps, goals,
   assists, season state and tournament eligibility.
 - [x] Make manager and teammate relationships affect selection and team results;
   make agent/community relationships affect transfer interest; make family and
   lifestyle choices affect recovery and reputation.
-- [x] Model sponsor duration, installments, payouts, expiration/termination and a
-  dedicated player-facing weekly receipt.
+- [x] Model sponsor duration, installments, payouts, expiration/termination and
+  persist their effects without interrupting the weekly flow.
 - [x] Add persistent lifestyle equipment with category-specific ongoing effects.
 - [x] Guarantee safe one-year second-division free-agent offers when a career has
   no renewal or standard interest, preventing an offseason dead end.
+- [x] Add a durable player-directed transfer request with a once-per-season
+  manager-trust consequence, projected post-promotion league targeting,
+  preferred-club prioritization, rejection feedback, and offseason clearing.
 - [x] Run and strictly merge 100,000 seeded full careers through the production
   engine with zero failures across 32,178,240 weeks and every required coverage
   dimension. Hosted repetition on the exact release revision remains a release
@@ -114,10 +118,13 @@ for that supply-chain/reproducibility gate.
   bundled content, remote-content checks and the API release fixture.
 - [x] Preserve the old `2026.1` formula path for existing careers during the
   compatibility period.
+- [x] Add rules `2026.3` and schema 10 with fractional development carry,
+  boost-use evidence, exact multiplier tests and boosted production-verifier
+  profiles while preserving `2026.2` career formulas.
 
 ### Saves, cloud and privacy
 
-- [x] Migrate snapshot schemas 1–7 to schema 8 with deterministic tests.
+- [x] Migrate snapshot schemas 1–8 to schema 9 with deterministic tests.
 - [x] Refuse unsafe pre-world midseason reconstruction explicitly instead of
   inventing historical results; season-boundary saves migrate deterministically.
 - [x] Show sync preparation/progress/success/failure/retry state and a detailed
@@ -144,7 +151,11 @@ for that supply-chain/reproducibility gate.
   competition-decision surfaces in English, Spanish, Brazilian Portuguese and
   French.
 - [x] Show selected avatars, theme previews, archive layouts and share-card
-  treatments in the Supporter Pack catalog.
+  treatments, with premium choices included in VIP and All-Access.
+- [x] Refactor the portrait app around Career, World, Life and a focused More
+  hub; split Player, Legacy, Appearance, Settings, and Account into dedicated
+  live routes; add a player-initiated Shop, three-step career creation, Life
+  Overview/Market/Collection and compact match recap.
 - [x] Add original code-native fictional club marks using each club's palette.
 - [x] Add visual knockout brackets, explicit qualification/tie-break guidance and
   a permanent career honors cabinet.
@@ -182,10 +193,11 @@ for that supply-chain/reproducibility gate.
   verify Sign in with Apple against the production audience and nonce flow.
 - [ ] Finish Google Android/iOS OAuth configuration, SHA fingerprints, iOS URL
   scheme and production server-client audience.
-- [ ] Create the permanent Extra Career Slots and Supporter Pack products and
-  entitlements in App Store Connect, Play Console and RevenueCat.
-- [ ] Decide and approve RevenueCat verification enforcement for offline cosmetics
-  and slots. The current informational policy, threats and required evidence are
+- [ ] Create VIP Starter Pack, 2× Development, 2× Money and All-Access as
+  permanent products and mapped entitlements in App Store Connect, Play Console
+  and RevenueCat. Keep legacy Extra Career Slots and Supporter Pack hidden.
+- [ ] Decide and approve RevenueCat verification enforcement for offline reward
+  modifiers, cosmetics and slots. The current informational policy, threats and required evidence are
   documented in [THREAT_MODEL.md](THREAT_MODEL.md), but independent review is
   still required.
 - [ ] Run purchase, restore, delayed/duplicate webhook, refund, revocation,

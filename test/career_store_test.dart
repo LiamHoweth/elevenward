@@ -32,6 +32,35 @@ void main() {
     expect(slots.last.isOccupied, isFalse);
   });
 
+  test(
+    'weekly focus preferences are isolated, validated, and removable',
+    () async {
+      await store.saveWeeklyFocus('career-a', PlayerAttribute.pace);
+      await store.saveWeeklyFocus('career-b', PlayerAttribute.composure);
+
+      expect(await store.loadWeeklyFocus('career-a'), PlayerAttribute.pace);
+      expect(
+        await store.loadWeeklyFocus('career-b'),
+        PlayerAttribute.composure,
+      );
+
+      await store.setPreference(
+        weeklyFocusPreferenceKey('career-a'),
+        'not-an-attribute',
+      );
+      expect(
+        await store.loadWeeklyFocus('career-a'),
+        PlayerAttribute.finishing,
+      );
+
+      await store.removeWeeklyFocus('career-b');
+      expect(
+        await store.getPreference(weeklyFocusPreferenceKey('career-b')),
+        isNull,
+      );
+    },
+  );
+
   test('enforces free and entitled career slot limits', () async {
     await expectLater(
       store.saveSlot(2, CareerSnapshot.newCareer()),

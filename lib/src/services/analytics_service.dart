@@ -29,7 +29,14 @@ final class AnalyticsService {
     'position': {'striker', 'winger', 'midfielder', 'defender'},
     'difficulty': {'story', 'professional', 'worldClass', 'balanced', 'elite'},
     'result': {'win', 'draw', 'loss'},
-    'product': {'extra_career_slots', 'supporter_pack'},
+    'product': {
+      'all_access',
+      'vip_starter_pack',
+      'double_development',
+      'double_money',
+      'extra_career_slots',
+      'supporter_pack',
+    },
   };
   static const _safeTextFields = {'area', 'category', 'code'};
 

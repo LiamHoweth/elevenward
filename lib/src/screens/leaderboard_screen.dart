@@ -60,6 +60,30 @@ final class _LeaderboardScreenState extends State<LeaderboardScreen> {
               uiCopy(locale, 'leaderboardNoPrizes'),
               style: const TextStyle(color: ElevenwardColors.muted),
             ),
+            const SizedBox(height: 12),
+            Card(
+              child: Column(
+                children: [
+                  SwitchListTile.adaptive(
+                    secondary: const Icon(Icons.visibility_outlined),
+                    title: Text(uiCopy(locale, 'shareRetiredCareer')),
+                    subtitle: Text(uiCopy(locale, 'leaderboardPrivacy')),
+                    value: widget.controller.leaderboardOptIn,
+                    onChanged: widget.controller.changeLeaderboardOptIn,
+                  ),
+                  if (widget.controller.activeCareer?.retired == true &&
+                      widget.controller.leaderboardOptIn)
+                    ListTile(
+                      leading: const Icon(Icons.publish_rounded),
+                      title: Text(uiCopy(locale, 'submitCompletedCareer')),
+                      enabled:
+                          widget.controller.account != null &&
+                          !widget.controller.busy,
+                      onTap: widget.controller.submitActiveCareerLeaderboard,
+                    ),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             DropdownButtonFormField<PositionFamily>(
               initialValue: _position,
@@ -81,23 +105,26 @@ final class _LeaderboardScreenState extends State<LeaderboardScreen> {
               },
             ),
             const SizedBox(height: 10),
-            SegmentedButton<Difficulty>(
-              segments: Difficulty.values
-                  .map(
-                    (value) => ButtonSegment(
-                      value: value,
-                      label: Text(_difficultyLabel(context, value)),
-                    ),
-                  )
-                  .toList(),
-              selected: {_difficulty},
-              showSelectedIcon: false,
-              onSelectionChanged: (values) {
-                setState(() {
-                  _difficulty = values.single;
-                  _refresh();
-                });
-              },
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: SegmentedButton<Difficulty>(
+                segments: Difficulty.values
+                    .map(
+                      (value) => ButtonSegment(
+                        value: value,
+                        label: Text(_difficultyLabel(context, value)),
+                      ),
+                    )
+                    .toList(),
+                selected: {_difficulty},
+                showSelectedIcon: false,
+                onSelectionChanged: (values) {
+                  setState(() {
+                    _difficulty = values.single;
+                    _refresh();
+                  });
+                },
+              ),
             ),
             const SizedBox(height: 18),
             FutureBuilder<List<Map<String, Object?>>>(
@@ -157,8 +184,10 @@ final class _EntryTile extends StatelessWidget {
     final metrics = entry['aggregateMetrics'] is Map
         ? (entry['aggregateMetrics'] as Map).cast<String, Object?>()
         : const <String, Object?>{};
+    final locale = contentLocale(context);
     return Semantics(
-      label: 'Rank $rank, ${entry['alias']}, $score points',
+      label:
+          '${uiCopy(locale, 'rank')} $rank, ${entry['alias']}, $score ${uiCopy(locale, 'points')}',
       child: Card(
         child: ListTile(
           leading: CircleAvatar(
@@ -173,8 +202,8 @@ final class _EntryTile extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           subtitle: Text(
-            '${metrics['seasons'] ?? 0} seasons · '
-            '${metrics['trophies'] ?? 0} trophies',
+            '${metrics['seasons'] ?? 0} ${uiCopy(locale, 'seasons')} · '
+            '${metrics['trophies'] ?? 0} ${uiCopy(locale, 'trophies')}',
           ),
           trailing: Text(
             '$score',

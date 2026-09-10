@@ -1,17 +1,25 @@
+import 'dart:math' as math;
+
 import '../content/content_models.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
 import '../model/enums.dart';
 import '../model/json_helpers.dart';
 import '../model/player_state.dart';
+import '../model/reward_modifiers.dart';
 import '../model/weekly_models.dart';
+import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'match_report_generator.dart';
+import 'news_engine.dart';
 import 'world_simulator.dart';
 
 final class WeeklySimulator {
   const WeeklySimulator();
 
   static const _worldSimulator = WorldSimulator();
+  static const _reportGenerator = MatchReportGenerator();
+  static const _newsEngine = NewsEngine();
 
   SpotlightPreview previewSpotlight({
     required CareerSnapshot snapshot,
@@ -20,8 +28,11 @@ final class WeeklySimulator {
     required SpotlightApproach approach,
     required OpponentContext opponent,
     SituationOption? situationOption,
+    RewardModifiers modifiers = RewardModifiers.standard,
   }) {
-    final trained = _applyTraining(snapshot.player, focus, intensity);
+    final trained = snapshot.phase == CareerPhase.internationalTournament
+        ? snapshot.player
+        : _trainingOutcome(snapshot, focus, intensity, modifiers).player;
     return _preview(
       trained,
       approach,
@@ -36,12 +47,13 @@ final class WeeklySimulator {
     required OpponentContext opponent,
     PlayerAttribute? focus,
     TrainingIntensity intensity = TrainingIntensity.balanced,
+    RewardModifiers modifiers = RewardModifiers.standard,
   }) {
-    final expandedLifeRules =
-        snapshot.rulesVersion == CareerSnapshot.currentRulesVersion;
-    final player = focus == null
-        ? snapshot.player
-        : _applyTraining(snapshot.player, focus, intensity);
+    final expandedLifeRules = snapshot.usesExpandedLifeRules;
+    final player =
+        focus == null || snapshot.phase == CareerPhase.internationalTournament
+            ? snapshot.player
+            : _trainingOutcome(snapshot, focus, intensity, modifiers).player;
     final reasons = <OutcomeFactor>[
       OutcomeFactor(
         label: 'Manager trust',
@@ -95,25 +107,41 @@ final class WeeklySimulator {
     required OpponentContext opponent,
     required DateTime updatedAt,
     SituationOption? situationOption,
+    RewardModifiers modifiers = RewardModifiers.standard,
+    WorldDefinition? definition,
   }) {
-    if (snapshot.phase != CareerPhase.inSeason) {
-      throw StateError('Only an active season can advance a matchweek.');
+    final world = definition ?? buildLaunchWorld();
+    final isNationalPostseason =
+        snapshot.phase == CareerPhase.internationalTournament;
+    if (snapshot.phase != CareerPhase.inSeason && !isNationalPostseason) {
+      throw StateError('Only an active competition can advance a matchweek.');
     }
     if (situationOption != null &&
         situationOption.approach != choice.spotlightApproach) {
       throw ArgumentError(
           'The authored option must match the chosen approach.');
     }
-    final playerAfterTraining = _applyTraining(
-      snapshot.player,
-      choice.focus,
-      choice.intensity,
-    );
+    final training = isNationalPostseason
+        ? (
+            player: snapshot.player,
+            progress: snapshot.developmentProgress,
+            baseGain: 0,
+            gain: 0,
+            remainder: snapshot.developmentProgress[choice.focus] ?? 0,
+          )
+        : _trainingOutcome(
+            snapshot,
+            choice.focus,
+            choice.intensity,
+            modifiers,
+          );
+    final playerAfterTraining = training.player;
     final selection = previewSelection(
       snapshot: snapshot,
       opponent: opponent,
       focus: choice.focus,
       intensity: choice.intensity,
+      modifiers: modifiers,
     );
     final preview = _preview(
       playerAfterTraining,
@@ -123,8 +151,7 @@ final class WeeklySimulator {
       situationOption: situationOption,
     );
     final rng = _DeterministicRandom(snapshot.seed ^ snapshot.revision);
-    final expandedLifeRules =
-        snapshot.rulesVersion == CareerSnapshot.currentRulesVersion;
+    final expandedLifeRules = snapshot.usesExpandedLifeRules;
     final roll = roundTo(rng.nextDouble() * 100, 1);
     final selected = selection.status != SelectionStatus.omitted;
     final success = selected && roll < preview.chance;
@@ -153,11 +180,12 @@ final class WeeklySimulator {
         selected && success && goals == 0 && rng.nextDouble() < 0.38 ? 1 : 0;
 
     final authoredTrust = situationOption?.trustRisk ?? 0;
-    final trustDelta = selection.status == SelectionStatus.omitted
+    final earnedTrustDelta = selection.status == SelectionStatus.omitted
         ? -1
         : success
             ? 3 + authoredTrust.clamp(0, 2)
             : -1 + authoredTrust.clamp(-2, 0);
+    final trustDelta = isNationalPostseason ? 0 : earnedTrustDelta;
     final hasHome =
         expandedLifeRules && snapshot.equippedItemIds.containsKey('home');
     final hasTransportation = expandedLifeRules &&
@@ -171,8 +199,10 @@ final class WeeklySimulator {
     final reputationDelta =
         success ? 2 + goals + (hasStyle ? 1 : 0) + communityBoost : 0;
     final formDelta = success ? 3 : -2;
-    final moneyDelta = snapshot.contract.weeklyWage +
-        (selected ? snapshot.contract.appearanceBonus : 0);
+    final baseMoneyIncome = isNationalPostseason
+        ? 0
+        : snapshot.contract.weeklyWage +
+            (selected ? snapshot.contract.appearanceBonus : 0);
     // This is the net post-match load after ordinary between-week recovery.
     // The training load has already been applied to [playerAfterTraining].
     final postMatchFitnessDelta = switch (selection.status) {
@@ -180,22 +210,30 @@ final class WeeklySimulator {
       SelectionStatus.bench => 3,
       SelectionStatus.omitted => 6,
     };
-    final lifestyleFitnessRecovery =
-        (hasTransportation ? 1 : 0) + (hasWellness ? 2 : 0);
-    final familyFitnessRecovery =
-        expandedLifeRules && snapshot.relationships.family >= 75 ? 1 : 0;
+    final lifestyleFitnessRecovery = isNationalPostseason
+        ? 0
+        : (hasTransportation ? 1 : 0) + (hasWellness ? 2 : 0);
+    final familyFitnessRecovery = isNationalPostseason
+        ? 0
+        : expandedLifeRules && snapshot.relationships.family >= 75
+            ? 1
+            : 0;
     final finalFitness = (playerAfterTraining.fitness +
             postMatchFitnessDelta +
             lifestyleFitnessRecovery +
             familyFitnessRecovery)
         .clamp(1, 100);
     final fitnessDelta = finalFitness - snapshot.player.fitness;
-    final roleSatisfactionDelta = switch (snapshot.contract.promisedRole) {
-      'important' => selection.status == SelectionStatus.starter ? 3 : -6,
-      'rotation' => selection.status == SelectionStatus.omitted ? -3 : 2,
-      _ => selection.status == SelectionStatus.omitted ? 0 : 2,
-    };
-    final payableSponsors = snapshot.sponsorContracts
+    final roleSatisfactionDelta = isNationalPostseason
+        ? 0
+        : switch (snapshot.contract.promisedRole) {
+            'important' => selection.status == SelectionStatus.starter ? 3 : -6,
+            'rotation' => selection.status == SelectionStatus.omitted ? -3 : 2,
+            _ => selection.status == SelectionStatus.omitted ? 0 : 2,
+          };
+    final payableSponsors = (isNationalPostseason
+            ? const <SponsorContract>[]
+            : snapshot.sponsorContracts)
         .where(
           (contract) =>
               contract.weeksRemaining > 0 &&
@@ -203,64 +241,120 @@ final class WeeklySimulator {
                   snapshot.player.reputation < 35),
         )
         .toList(growable: false);
-    final sponsorContracts = payableSponsors
-        .where((contract) => contract.weeksRemaining > 1)
-        .map(
-          (contract) => contract.copyWith(
-            weeksRemaining: contract.weeksRemaining - 1,
-          ),
-        )
-        .toList(growable: false);
+    final sponsorContracts = isNationalPostseason
+        ? snapshot.sponsorContracts
+        : payableSponsors
+            .where((contract) => contract.weeksRemaining > 1)
+            .map(
+              (contract) => contract.copyWith(
+                weeksRemaining: contract.weeksRemaining - 1,
+              ),
+            )
+            .toList(growable: false);
     final sponsorPayout = payableSponsors.fold<int>(
       0,
       (sum, contract) => sum + contract.weeklyPayout,
     );
+    final grossMoneyIncome = modifiers.applyPositiveMoney(
+      baseMoneyIncome + sponsorPayout,
+    );
+    final activeAgent = launchAgents.firstWhere(
+      (agent) => agent.id == snapshot.activeAgentId,
+      orElse: () => launchAgents.first,
+    );
+    final agentFeeDue = !isNationalPostseason && snapshot.week % 4 == 0
+        ? activeAgent.monthlyFee
+        : 0;
+    final availableForFee = playerAfterTraining.money + grossMoneyIncome;
+    final agentFee = math.min(agentFeeDue, availableForFee);
+    final agentReleased = agentFee < agentFeeDue;
+    final finalMoneyIncome = grossMoneyIncome - agentFee;
+    final finalSponsorPayout = modifiers.applyPositiveMoney(sponsorPayout);
     final payableSponsorIds = payableSponsors.map((item) => item.id).toSet();
-    final endedSponsorIds = snapshot.sponsorContracts
-        .where(
-          (contract) =>
-              !payableSponsorIds.contains(contract.id) ||
-              contract.weeksRemaining == 1,
-        )
-        .map((contract) => contract.id)
-        .toList(growable: false);
+    final endedSponsorIds = isNationalPostseason
+        ? const <String>[]
+        : snapshot.sponsorContracts
+            .where(
+              (contract) =>
+                  !payableSponsorIds.contains(contract.id) ||
+                  contract.weeksRemaining == 1,
+            )
+            .map((contract) => contract.id)
+            .toList(growable: false);
 
-    final teamWinChance = (51 +
-            (opponent.tacticalFit - opponent.quality) * 0.28 +
-            (success ? 10 : -3) +
-            (opponent.isHome ? 4 : -2) +
-            (expandedLifeRules
-                ? (snapshot.relationships.teammates - 50) * 0.08
-                : 0))
-        .clamp(18, 82)
-        .toDouble();
-    final teamRoll = rng.nextDouble() * 100;
-    TeamResult teamResult;
-    if (teamRoll < teamWinChance) {
-      teamResult = TeamResult.win;
-    } else if (teamRoll < teamWinChance + 24) {
-      teamResult = TeamResult.draw;
-    } else {
-      teamResult = TeamResult.loss;
-    }
-    final opponentGoals = rng.nextInt(3);
-    final playerClubGoals = (switch (teamResult) {
-      TeamResult.win => opponentGoals + 1 + rng.nextInt(2),
-      TeamResult.draw => opponentGoals,
-      TeamResult.loss => (opponentGoals - 1).clamp(0, 4),
-    })
-        .clamp(goals, 10);
-    var rivalGoals =
-        teamResult == TeamResult.draw ? playerClubGoals : opponentGoals;
-    if (teamResult == TeamResult.loss && rivalGoals <= playerClubGoals) {
-      rivalGoals = playerClubGoals + 1;
-    }
+    // A compact tactical simulation: role output, form, fitness, tactical fit,
+    // venue, and team relationships shape territory and chance quality before
+    // goals are sampled. This creates a coherent statistical match identity.
+    final attackingLevel = playerAfterTraining.overall * 0.45 +
+        playerAfterTraining.form * 0.18 +
+        playerAfterTraining.fitness * 0.12 +
+        opponent.tacticalFit * 0.25 +
+        (success ? 6 : -2) +
+        (opponent.isHome ? 3 : -2) +
+        (expandedLifeRules
+            ? (snapshot.relationships.teammates - 50) * 0.06
+            : 0);
+    final possession = (50 +
+            (attackingLevel - opponent.quality) * 0.32 +
+            (opponent.isHome ? 2 : -2) +
+            (rng.nextDouble() - 0.5) * 8)
+        .clamp(32, 68)
+        .round();
+    final expectedGoals = roundTo(
+      (1.15 +
+              (attackingLevel - opponent.quality) * 0.035 +
+              (possession - 50) * 0.025 +
+              (success ? 0.4 : -0.05) +
+              (rng.nextDouble() - 0.5) * 0.5)
+          .clamp(0.25, 3.8)
+          .toDouble(),
+      1,
+    );
+    final opponentExpectedGoals = roundTo(
+      (1.1 +
+              (opponent.quality - attackingLevel) * 0.03 +
+              (50 - possession) * 0.02 +
+              (rng.nextDouble() - 0.5) * 0.5)
+          .clamp(0.2, 3.6)
+          .toDouble(),
+      1,
+    );
+    final playerClubGoals = math.max(
+      goals,
+      _poisson(expectedGoals, rng).clamp(0, 6),
+    );
+    final rivalGoals = _poisson(opponentExpectedGoals, rng).clamp(0, 6);
+    TeamResult teamResult = playerClubGoals > rivalGoals
+        ? TeamResult.win
+        : playerClubGoals < rivalGoals
+            ? TeamResult.loss
+            : TeamResult.draw;
     var homeScore = opponent.isHome ? playerClubGoals : rivalGoals;
     var awayScore = opponent.isHome ? rivalGoals : playerClubGoals;
     var fixtureDecision = FixtureDecision.regulation;
-    final offPitch = _offPitchEvent(success, choice.intensity, rng.nextInt(3));
+    final shots = math.max(
+      playerClubGoals,
+      (expectedGoals * 4.3 + rng.nextInt(5)).round(),
+    );
+    final shotsOnTarget = math.max(
+      playerClubGoals,
+      math.min(shots, (shots * (0.34 + rng.nextDouble() * 0.18)).round()),
+    );
+    final bigChances = math.max(
+      playerClubGoals,
+      (expectedGoals * 1.35 + rng.nextDouble()).floor(),
+    );
+    final momentumSwings = 1 + rng.nextInt(5);
+    final lateDrama =
+        (playerClubGoals - rivalGoals).abs() <= 1 && rng.nextDouble() < 0.58;
+    final comeback = teamResult == TeamResult.win &&
+        rivalGoals > 0 &&
+        rng.nextDouble() < 0.38;
+    final offPitch = isNationalPostseason
+        ? ('', '')
+        : _offPitchEvent(success, choice.intensity, rng.nextInt(3));
 
-    final wellnessDelta = expandedLifeRules
+    final wellnessDelta = expandedLifeRules && !isNationalPostseason
         ? (hasHome ? 2 : 0) +
             (hasWellness ? 2 : 0) +
             (snapshot.relationships.family >= 75
@@ -275,7 +369,7 @@ final class WeeklySimulator {
             }
         : 0;
 
-    final seasonComplete = snapshot.week == 18;
+    final seasonComplete = !isNationalPostseason && snapshot.week == 18;
     final nextWeek = seasonComplete ? 18 : snapshot.week + 1;
     final nextSeason = snapshot.season;
     final nextAge = snapshot.player.age;
@@ -291,32 +385,104 @@ final class WeeklySimulator {
         0,
         100,
       ),
-      money: playerAfterTraining.money + moneyDelta + sponsorPayout,
-      appearances: playerAfterTraining.appearances + (selected ? 1 : 0),
-      goals: playerAfterTraining.goals + goals,
-      assists: playerAfterTraining.assists + assists,
+      money: (playerAfterTraining.money + finalMoneyIncome).clamp(0, 1 << 52),
+      appearances: playerAfterTraining.appearances +
+          (!isNationalPostseason && selected ? 1 : 0),
+      goals: playerAfterTraining.goals + (isNationalPostseason ? 0 : goals),
+      assists:
+          playerAfterTraining.assists + (isNationalPostseason ? 0 : assists),
     );
-    final nextPerformance = snapshot.seasonPerformance.add(
-      appeared: selected,
-      goals: goals,
-      assists: assists,
-      rating: rating,
-    );
+    final nextPerformance = isNationalPostseason
+        ? snapshot.seasonPerformance
+        : snapshot.seasonPerformance.add(
+            appeared: selected,
+            goals: goals,
+            assists: assists,
+            rating: rating,
+          );
     final isNationalAppearance =
         opponent.competitionKind == CompetitionKind.nationalTournament &&
             selected;
-    final nextNationalTeam = isNationalAppearance
-        ? snapshot.nationalTeam.copyWith(
-            caps: snapshot.nationalTeam.caps + 1,
-            goals: snapshot.nationalTeam.goals + goals,
-            assists: snapshot.nationalTeam.assists + assists,
+    var nextNationalTeam = snapshot.nationalTeam;
+    if (isNationalPostseason) {
+      nextNationalTeam = snapshot.nationalTeam.copyWith(
+        caps: snapshot.nationalTeam.caps + (isNationalAppearance ? 1 : 0),
+        goals: snapshot.nationalTeam.goals + (isNationalAppearance ? goals : 0),
+        assists: snapshot.nationalTeam.assists +
+            (isNationalAppearance ? assists : 0),
+        tournamentMatchday: snapshot.nationalTeam.tournamentMatchday + 1,
+        cycleAppearances: snapshot.nationalTeam.cycleAppearances +
+            (isNationalAppearance ? 1 : 0),
+      );
+    } else if (isNationalAppearance) {
+      nextNationalTeam = snapshot.nationalTeam.copyWith(
+        caps: snapshot.nationalTeam.caps + 1,
+        goals: snapshot.nationalTeam.goals + goals,
+        assists: snapshot.nationalTeam.assists + assists,
+      );
+    }
+    var nextWorld = isNationalPostseason
+        ? _worldSimulator.advanceNationalTournamentMatch(
+            snapshot: snapshot.copyWith(
+              nationalTeam: nextNationalTeam.copyWith(
+                tournamentMatchday: snapshot.nationalTeam.tournamentMatchday,
+              ),
+            ),
+            playerHomeScore: homeScore,
+            playerAwayScore: awayScore,
+            definition: world,
           )
-        : snapshot.nationalTeam;
-    final nextWorld = _worldSimulator.advanceMatchweek(
-      snapshot: snapshot,
-      playerHomeScore: homeScore,
-      playerAwayScore: awayScore,
-    );
+        : _worldSimulator.advanceMatchweek(
+            snapshot: snapshot,
+            playerHomeScore: homeScore,
+            playerAwayScore: awayScore,
+            definition: world,
+          );
+    var nextPhase = seasonComplete
+        ? CareerPhase.offseason
+        : isNationalPostseason
+            ? CareerPhase.internationalTournament
+            : CareerPhase.inSeason;
+    if (isNationalPostseason &&
+        (nextWorld.competitions['world-nations-championship']?.isComplete ??
+            true)) {
+      nextPhase = CareerPhase.offseason;
+    }
+    if (seasonComplete) {
+      final tournament = nextWorld.competitions['world-nations-championship'];
+      if (tournament != null && !tournament.isComplete) {
+        final requirements = nationalCallupRequirements(
+          world,
+          snapshot.player.nationalTeamId,
+        );
+        final qualified =
+            tournament.participantIds.contains(snapshot.player.nationalTeamId);
+        final invited = qualified &&
+            snapshot.player.overall >= requirements.overall &&
+            snapshot.player.reputation >= requirements.reputation;
+        if (invited) {
+          nextPhase = CareerPhase.internationalCallup;
+          nextNationalTeam = snapshot.nationalTeam.copyWith(
+            decision: NationalTeamDecision.undecided,
+            decisionSeason: snapshot.season,
+            tournamentMatchday: 1,
+            cycleAppearances: 0,
+          );
+        } else {
+          nextWorld = _worldSimulator.completeNationalTournament(
+            snapshot: snapshot.copyWith(
+              world: nextWorld,
+              nationalTeam: snapshot.nationalTeam.copyWith(
+                tournamentMatchday: 1,
+                cycleAppearances: 0,
+              ),
+            ),
+            definition: world,
+            playerFinishOverride: qualified ? 'missedSquad' : 'didNotQualify',
+          );
+        }
+      }
+    }
     // Knockout ties are resolved by the world engine. The receipt must show
     // the same decisive score as the saved bracket, not the pre-tiebreak draw.
     final competition = nextWorld.competitions[opponent.competitionId];
@@ -326,7 +492,10 @@ final class WeeklySimulator {
           : snapshot.clubId;
       final fixture = competition.fixtures
           .where((fixture) =>
-              fixture.matchweek == snapshot.week &&
+              fixture.matchweek ==
+                  (isNationalPostseason
+                      ? snapshot.nationalTeam.tournamentMatchday
+                      : snapshot.week) &&
               (fixture.homeId == playerId || fixture.awayId == playerId))
           .firstOrNull;
       if (fixture != null && fixture.isPlayed) {
@@ -342,7 +511,7 @@ final class WeeklySimulator {
                 : TeamResult.draw;
       }
     }
-    final nextSnapshot = snapshot.copyWith(
+    var nextSnapshot = snapshot.copyWith(
       seed: rng.state,
       revision: snapshot.revision + 1,
       updatedAt: updatedAt.toUtc(),
@@ -353,7 +522,7 @@ final class WeeklySimulator {
           .firstWhere((record) => record.clubId == snapshot.clubId)
           .points,
       player: nextPlayer,
-      phase: seasonComplete ? CareerPhase.offseason : CareerPhase.inSeason,
+      phase: nextPhase,
       world: nextWorld,
       seasonPerformance: nextPerformance,
       nationalTeam: nextNationalTeam,
@@ -366,15 +535,28 @@ final class WeeklySimulator {
       sponsorIds: sponsorContracts
           .map((contract) => contract.id)
           .toList(growable: false),
-      relationships: snapshot.relationships.copyWith(
-        manager: snapshot.relationships.manager + trustDelta,
-        teammates: snapshot.relationships.teammates +
-            switch (teamResult) {
-              TeamResult.win => 2,
-              TeamResult.draw => 0,
-              TeamResult.loss => -1,
-            },
-      ),
+      activeAgentId:
+          agentReleased ? 'agent-independent' : snapshot.activeAgentId,
+      relationships: isNationalPostseason
+          ? snapshot.relationships
+          : snapshot.relationships.copyWith(
+              manager: snapshot.relationships.manager + trustDelta,
+              teammates: snapshot.relationships.teammates +
+                  switch (teamResult) {
+                    TeamResult.win => 2,
+                    TeamResult.draw => 0,
+                    TeamResult.loss => -1,
+                  },
+              agent: agentReleased ? 20 : snapshot.relationships.agent,
+            ),
+      developmentProgress: training.progress,
+      boostIdsUsed: ({
+        ...snapshot.boostIdsUsed,
+        if ((training.baseGain > 0 && modifiers.boostsDevelopment) ||
+            (baseMoneyIncome + sponsorPayout > 0 && modifiers.boostsMoney))
+          ...modifiers.sourceIds,
+      }.toList(growable: false)
+        ..sort()),
     );
 
     final factors = [
@@ -391,9 +573,76 @@ final class WeeklySimulator {
           detail: 'Strong local reputation network',
           impact: 1,
         ),
+      if (agentFee > 0)
+        OutcomeFactor(
+          label: 'Agent retainer',
+          detail: '-£$agentFee monthly fee',
+          impact: -agentFee / 100,
+        ),
     ]..sort((a, b) => b.impact.abs().compareTo(a.impact.abs()));
-    final resultLabel =
-        success ? 'made the moment count' : 'couldn\'t force it';
+    final metrics = MatchMetrics(
+      possession: possession,
+      shots: shots,
+      shotsOnTarget: shotsOnTarget,
+      expectedGoals: expectedGoals,
+      opponentExpectedGoals: opponentExpectedGoals,
+      bigChances: bigChances,
+      momentumSwings: momentumSwings,
+      lateDrama: lateDrama,
+      comeback: comeback,
+    );
+    final copySeed =
+        snapshot.seed ^ snapshot.revision ^ (homeScore << 8) ^ awayScore;
+    final headline = _reportGenerator.headline(
+      seed: copySeed,
+      playerName: snapshot.player.name,
+      opponentName: opponent.clubName,
+      result: teamResult,
+      playerGoals: goals,
+      playerAssists: assists,
+      lateDrama: lateDrama,
+    );
+    final playerTeamName = isNationalPostseason
+        ? world.nationalTeam(snapshot.player.nationalTeamId).countryName
+        : snapshot.clubName;
+    final matchReport = _reportGenerator.generate(
+      seed: copySeed,
+      playerName: snapshot.player.name,
+      clubName: playerTeamName,
+      opponentName: opponent.clubName,
+      isHome: opponent.isHome,
+      homeScore: homeScore,
+      awayScore: awayScore,
+      result: teamResult,
+      selection: selection.status,
+      approach: choice.spotlightApproach,
+      spotlightSucceeded: success,
+      playerGoals: goals,
+      playerAssists: assists,
+      rating: rating,
+      metrics: metrics,
+    );
+    final newsStories = _newsEngine.generateMatchweek(
+      snapshot: nextSnapshot,
+      season: snapshot.season,
+      week: snapshot.week,
+      opponent: opponent,
+      result: teamResult,
+      homeScore: homeScore,
+      awayScore: awayScore,
+      rating: rating,
+      playerGoals: goals,
+      playerAssists: assists,
+      metrics: metrics,
+      agentReleased: agentReleased,
+    );
+    final storyIds = newsStories.map((story) => story.id).toSet();
+    nextSnapshot = nextSnapshot.copyWith(
+      newsFeed: [
+        ...newsStories,
+        ...snapshot.newsFeed.where((story) => !storyIds.contains(story.id)),
+      ].take(60).toList(growable: false),
+    );
 
     return WeeklyResult(
       snapshot: nextSnapshot,
@@ -409,28 +658,56 @@ final class WeeklySimulator {
         rating: rating,
         trust: trustDelta,
         reputation: reputationDelta,
-        money: moneyDelta + sponsorPayout,
+        money: finalMoneyIncome,
         fitness: fitnessDelta,
         form: formDelta,
         goals: goals,
         assists: assists,
       ),
       factors: List.unmodifiable(factors.take(7)),
-      headline: '${snapshot.player.name} $resultLabel under the lights.',
+      headline: headline,
+      matchReport: matchReport,
+      metrics: metrics,
+      newsStories: newsStories,
       offPitchTitle: offPitch.$1,
       offPitchBody: offPitch.$2,
-      sponsorPayout: sponsorPayout,
+      sponsorPayout: finalSponsorPayout,
       endedSponsorIds: List.unmodifiable(endedSponsorIds),
       fixtureDecision: fixtureDecision,
+      trainedAttribute: choice.focus,
+      developmentGain: training.gain,
+      developmentRemainder: training.remainder,
+      developmentMultiplier: modifiers.developmentMultiplier,
+      moneyMultiplier: modifiers.moneyMultiplier,
+      agentFee: agentFee,
+      agentReleased: agentReleased,
     );
   }
 
-  PlayerState _applyTraining(
+  int _poisson(double lambda, _DeterministicRandom rng) {
+    final limit = math.exp(-lambda);
+    var product = 1.0;
+    var count = 0;
+    do {
+      count++;
+      product *= rng.nextDouble();
+    } while (product > limit && count < 8);
+    return count - 1;
+  }
+
+  ({
     PlayerState player,
+    Map<PlayerAttribute, double> progress,
+    int baseGain,
+    int gain,
+    double remainder,
+  }) _trainingOutcome(
+    CareerSnapshot snapshot,
     PlayerAttribute focus,
     TrainingIntensity intensity,
+    RewardModifiers modifiers,
   ) {
-    final gain = switch (intensity) {
+    final baseGain = switch (intensity) {
       TrainingIntensity.light => 0,
       TrainingIntensity.balanced => 1,
       TrainingIntensity.intensive => 2,
@@ -440,9 +717,28 @@ final class WeeklySimulator {
       TrainingIntensity.balanced => -2,
       TrainingIntensity.intensive => -8,
     };
-    return player.copyWith(
-      attributes: player.attributes.improve(focus, gain),
-      fitness: (player.fitness + fitnessChange).clamp(1, 100),
+    final player = snapshot.player;
+    final currentProgress = snapshot.developmentProgress[focus] ?? 0;
+    final accumulated =
+        currentProgress + baseGain * modifiers.developmentMultiplier;
+    final room = 99 - player.attributes[focus];
+    final gain = accumulated.floor().clamp(0, room).toInt();
+    final capped = gain >= room;
+    final remainder = capped ? 0.0 : accumulated - gain;
+    final progress = <PlayerAttribute, double>{
+      ...snapshot.developmentProgress,
+      if (remainder > 0) focus: remainder,
+    };
+    if (remainder == 0) progress.remove(focus);
+    return (
+      player: player.copyWith(
+        attributes: player.attributes.improve(focus, gain),
+        fitness: (player.fitness + fitnessChange).clamp(1, 100),
+      ),
+      progress: Map.unmodifiable(progress),
+      baseGain: baseGain,
+      gain: gain,
+      remainder: remainder,
     );
   }
 

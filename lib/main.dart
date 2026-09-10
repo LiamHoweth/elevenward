@@ -10,6 +10,7 @@ import 'src/app_controller.dart';
 import 'src/game_screen.dart';
 import 'src/screens/career_hub_screen.dart';
 import 'src/screens/home_shell.dart';
+import 'src/screens/language_selection_screen.dart';
 import 'src/screens/onboarding_screen.dart';
 import 'src/services/analytics_service.dart';
 import 'src/services/auth_service.dart';
@@ -17,6 +18,7 @@ import 'src/services/content_service.dart';
 import 'src/services/elevenward_api.dart';
 import 'src/services/entitlement_service.dart';
 import 'src/services/privacy_error_reporter.dart';
+import 'src/services/review_prompt_service.dart';
 import 'src/services/sync_service.dart';
 import 'src/storage/career_store.dart';
 import 'src/storage/secure_credentials.dart';
@@ -49,6 +51,7 @@ Future<void> main() async {
     sync: SyncService(api, careerStore),
     analytics: AnalyticsService(api, careerStore),
     content: ContentService(api: api, store: careerStore),
+    reviewPrompts: ReviewPromptService(store: careerStore),
   );
   final errorReporter = PrivacyErrorReporter(controller.analytics);
   FlutterError.onError = (details) {
@@ -91,6 +94,9 @@ class ElevenwardApp extends StatelessWidget {
             : switch (appController.stage) {
                 AppStage.booting => const Scaffold(
                   body: Center(child: CircularProgressIndicator()),
+                ),
+                AppStage.languageSelection => LanguageSelectionScreen(
+                  onSelected: appController.selectInitialLanguage,
                 ),
                 AppStage.onboarding => OnboardingScreen(
                   onComplete: appController.completeOnboarding,

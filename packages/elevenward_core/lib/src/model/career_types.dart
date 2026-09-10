@@ -2,6 +2,8 @@ enum Difficulty { story, professional, worldClass }
 
 enum CareerPhase {
   inSeason,
+  internationalCallup,
+  internationalTournament,
   offseason,
   contractDecision,
   retirementDecision,
@@ -21,6 +23,8 @@ final class NationalTeamCareerState {
     this.caps = 0,
     this.goals = 0,
     this.assists = 0,
+    this.tournamentMatchday = 1,
+    this.cycleAppearances = 0,
   });
 
   factory NationalTeamCareerState.fromJson(Map<String, Object?> json) =>
@@ -33,6 +37,8 @@ final class NationalTeamCareerState {
         caps: json['caps'] as int? ?? 0,
         goals: json['goals'] as int? ?? 0,
         assists: json['assists'] as int? ?? 0,
+        tournamentMatchday: json['tournamentMatchday'] as int? ?? 1,
+        cycleAppearances: json['cycleAppearances'] as int? ?? 0,
       );
 
   final NationalTeamDecision decision;
@@ -40,6 +46,8 @@ final class NationalTeamCareerState {
   final int caps;
   final int goals;
   final int assists;
+  final int tournamentMatchday;
+  final int cycleAppearances;
 
   bool acceptedFor(int season) =>
       decision == NationalTeamDecision.accepted && decisionSeason == season;
@@ -53,6 +61,8 @@ final class NationalTeamCareerState {
     int? caps,
     int? goals,
     int? assists,
+    int? tournamentMatchday,
+    int? cycleAppearances,
   }) =>
       NationalTeamCareerState(
         decision: decision ?? this.decision,
@@ -60,6 +70,8 @@ final class NationalTeamCareerState {
         caps: caps ?? this.caps,
         goals: goals ?? this.goals,
         assists: assists ?? this.assists,
+        tournamentMatchday: tournamentMatchday ?? this.tournamentMatchday,
+        cycleAppearances: cycleAppearances ?? this.cycleAppearances,
       );
 
   Map<String, Object?> toJson() => {
@@ -68,6 +80,8 @@ final class NationalTeamCareerState {
         'caps': caps,
         'goals': goals,
         'assists': assists,
+        'tournamentMatchday': tournamentMatchday,
+        'cycleAppearances': cycleAppearances,
       };
 }
 
@@ -175,7 +189,78 @@ final class ContractState {
       };
 }
 
+/// A player-filed instruction that directs the next offseason club search.
+///
+/// The league is the primary destination. [preferredClubId] is only considered
+/// while that club remains in the requested league and meets normal interest
+/// requirements.
+final class TransferRequest {
+  const TransferRequest({
+    required this.targetLeagueId,
+    required this.filedSeason,
+    required this.filedWeek,
+    this.preferredClubId,
+  });
+
+  factory TransferRequest.fromJson(Map<String, Object?> json) =>
+      TransferRequest(
+        targetLeagueId: json['targetLeagueId'] as String,
+        preferredClubId: json['preferredClubId'] as String?,
+        filedSeason: json['filedSeason'] as int,
+        filedWeek: json['filedWeek'] as int,
+      );
+
+  final String targetLeagueId;
+  final String? preferredClubId;
+  final int filedSeason;
+  final int filedWeek;
+
+  Map<String, Object?> toJson() => {
+        'targetLeagueId': targetLeagueId,
+        'preferredClubId': preferredClubId,
+        'filedSeason': filedSeason,
+        'filedWeek': filedWeek,
+      };
+}
+
 enum NegotiationPriority { wage, role, term }
+
+/// A durable news story generated from a simulated football event.
+final class CareerNewsItem {
+  const CareerNewsItem({
+    required this.id,
+    required this.season,
+    required this.week,
+    required this.category,
+    required this.title,
+    required this.body,
+  });
+
+  factory CareerNewsItem.fromJson(Map<String, Object?> json) => CareerNewsItem(
+        id: json['id'] as String,
+        season: json['season'] as int,
+        week: json['week'] as int,
+        category: json['category'] as String,
+        title: json['title'] as String,
+        body: json['body'] as String,
+      );
+
+  final String id;
+  final int season;
+  final int week;
+  final String category;
+  final String title;
+  final String body;
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'season': season,
+        'week': week,
+        'category': category,
+        'title': title,
+        'body': body,
+      };
+}
 
 final class SponsorContract {
   const SponsorContract({
@@ -238,6 +323,7 @@ final class AgentDefinition {
   const AgentDefinition({
     required this.id,
     required this.name,
+    required this.monthlyFee,
     required this.marketReachBonus,
     required this.wageBonusPercent,
     required this.relationshipBonus,
@@ -245,6 +331,7 @@ final class AgentDefinition {
 
   final String id;
   final String name;
+  final int monthlyFee;
   final int marketReachBonus;
   final int wageBonusPercent;
   final int relationshipBonus;
@@ -254,6 +341,7 @@ const launchAgents = <AgentDefinition>[
   AgentDefinition(
     id: 'agent-independent',
     name: 'Independent',
+    monthlyFee: 0,
     marketReachBonus: 0,
     wageBonusPercent: 0,
     relationshipBonus: 0,
@@ -261,6 +349,7 @@ const launchAgents = <AgentDefinition>[
   AgentDefinition(
     id: 'agent-player-first',
     name: 'Player First',
+    monthlyFee: 400,
     marketReachBonus: 2,
     wageBonusPercent: 0,
     relationshipBonus: 10,
@@ -268,6 +357,7 @@ const launchAgents = <AgentDefinition>[
   AgentDefinition(
     id: 'agent-global-network',
     name: 'Global Network',
+    monthlyFee: 1000,
     marketReachBonus: 10,
     wageBonusPercent: 0,
     relationshipBonus: -5,
@@ -275,6 +365,7 @@ const launchAgents = <AgentDefinition>[
   AgentDefinition(
     id: 'agent-negotiator',
     name: 'The Negotiator',
+    monthlyFee: 750,
     marketReachBonus: 4,
     wageBonusPercent: 10,
     relationshipBonus: -2,

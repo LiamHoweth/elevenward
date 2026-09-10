@@ -44,7 +44,8 @@ final class ContentService {
        // ignore: prefer_initializing_formals
        _publicKeyBase64 = publicKeyBase64;
 
-  static const bundledAsset = 'assets/content/launch-2026.2.0.json';
+  static const bundledAsset = 'assets/content/launch-2026.3.0.json';
+  static const _legacyBundledAsset = 'assets/content/launch-2026.2.0.json';
   static const executableRulesVersion = CareerSnapshot.currentRulesVersion;
   static const _cacheKey = 'content.verified.bundle';
   static const _versionCacheKey = 'content.verified.versions';
@@ -97,7 +98,10 @@ final class ContentService {
   }
 
   Future<ActiveContent> _loadBundled({String? versionAlias}) async {
-    final source = await rootBundle.loadString(bundledAsset);
+    final asset = versionAlias == '2026.1.0' || versionAlias == '2026.2.0'
+        ? _legacyBundledAsset
+        : bundledAsset;
+    final source = await rootBundle.loadString(asset);
     final bundle = (jsonDecode(source) as Map).cast<String, Object?>();
     final bundledVersion = _releaseVersion(bundle);
     if (versionAlias != null &&

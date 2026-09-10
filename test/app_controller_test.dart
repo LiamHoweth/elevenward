@@ -37,6 +37,7 @@ void main() {
       content: content,
     );
     await store.setPreference('onboarding.completed', true);
+    await store.setPreference('language.selected', true);
     await store.saveSlot(
       0,
       CareerSnapshot.newCareer(
@@ -58,12 +59,28 @@ void main() {
         contentVersion: '2026.1.0',
       ),
     );
+    await store.saveWeeklyFocus('compatible-content', PlayerAttribute.pace);
     await controller.openSlot(0);
     expect(controller.stage, AppStage.playing);
     expect(controller.activeCareer?.careerId, 'compatible-content');
     expect(controller.activeContent?.version, '2026.1.0');
+    expect(controller.activeWeeklyFocus, PlayerAttribute.pace);
+
+    await controller.changeWeeklyFocus(PlayerAttribute.passing);
+    expect(
+      await store.loadWeeklyFocus('compatible-content'),
+      PlayerAttribute.passing,
+    );
 
     controller.showCareerSlots();
-    expect(controller.activeContent?.version, '2026.2.0');
+    expect(controller.activeContent?.version, '2026.3.0');
+
+    await controller.openSlot(0);
+    expect(controller.activeWeeklyFocus, PlayerAttribute.passing);
+    await controller.deleteSlot(0);
+    expect(
+      await store.getPreference(weeklyFocusPreferenceKey('compatible-content')),
+      isNull,
+    );
   });
 }

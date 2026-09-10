@@ -51,7 +51,8 @@ void main(List<String> paths) {
       'competitionCompletions',
       'transferCounts',
       'nationalTeamDecisionCounts',
-      'leagueMovementCounts'
+      'leagueMovementCounts',
+      'rewardProfileCounts',
     ]) {
       final totals = coverage.putIfAbsent(name, () => {});
       for (final entry in (report[name] as Map).entries) {
@@ -73,7 +74,8 @@ void main(List<String> paths) {
     'competitionCompletions': 3,
     'transferCounts': 3,
     'nationalTeamDecisionCounts': 2,
-    'leagueMovementCounts': 3
+    'leagueMovementCounts': 3,
+    'rewardProfileCounts': 4,
   }.entries) {
     final counts = coverage[requirement.key]!;
     if (counts.length != requirement.value ||

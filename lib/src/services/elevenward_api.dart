@@ -204,6 +204,11 @@ final class ElevenwardApi {
         'seed': snapshot.seed,
         'finalRevision': snapshot.revision,
         'snapshotChecksum': sha256Snapshot(snapshot),
+        'boostIdsUsed': snapshot.boostIdsUsed,
+        'developmentProgress': {
+          for (final entry in snapshot.developmentProgress.entries)
+            entry.key.name: entry.value,
+        },
       },
     },
   );

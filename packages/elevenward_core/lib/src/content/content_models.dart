@@ -1,4 +1,6 @@
 import '../model/enums.dart';
+import '../world/world_generator.dart';
+import '../world/world_models.dart';
 
 const supportedLocales = ['en', 'es', 'pt-BR', 'fr'];
 
@@ -84,6 +86,24 @@ enum CareerEventCategory {
   contract,
 }
 
+/// How the player performed in the match immediately before an off-pitch
+/// decision. Keeping this deliberately broad makes authored scenarios useful
+/// across positions while still letting the story react to what just happened.
+enum PreviousMatchPerformance { poor, steady, standout }
+
+/// Match context used to select an off-pitch decision.
+final class CareerEventContext {
+  const CareerEventContext({
+    required this.previousPerformance,
+    required this.previousGameWasHighStakes,
+    required this.nextGameIsHighStakes,
+  });
+
+  final PreviousMatchPerformance previousPerformance;
+  final bool previousGameWasHighStakes;
+  final bool nextGameIsHighStakes;
+}
+
 final class EventChoiceDefinition {
   const EventChoiceDefinition({
     required this.id,
@@ -118,6 +138,13 @@ final class CareerEventDefinition {
     required this.title,
     required this.body,
     required this.choices,
+    this.previousPerformances = const {
+      PreviousMatchPerformance.poor,
+      PreviousMatchPerformance.steady,
+      PreviousMatchPerformance.standout,
+    },
+    this.previousGameWasHighStakes,
+    this.nextGameIsHighStakes,
   });
 
   final String id;
@@ -125,6 +152,16 @@ final class CareerEventDefinition {
   final LocalizedText title;
   final LocalizedText body;
   final List<EventChoiceDefinition> choices;
+  final Set<PreviousMatchPerformance> previousPerformances;
+  final bool? previousGameWasHighStakes;
+  final bool? nextGameIsHighStakes;
+
+  bool matches(CareerEventContext context) =>
+      previousPerformances.contains(context.previousPerformance) &&
+      (previousGameWasHighStakes == null ||
+          previousGameWasHighStakes == context.previousGameWasHighStakes) &&
+      (nextGameIsHighStakes == null ||
+          nextGameIsHighStakes == context.nextGameIsHighStakes);
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -132,6 +169,10 @@ final class CareerEventDefinition {
         'title': title.toJson(),
         'body': body.toJson(),
         'choices': choices.map((value) => value.toJson()).toList(),
+        'previousPerformances':
+            previousPerformances.map((value) => value.name).toList(),
+        'previousGameWasHighStakes': previousGameWasHighStakes,
+        'nextGameIsHighStakes': nextGameIsHighStakes,
       };
 }
 
@@ -203,12 +244,13 @@ final class ContentManifest {
 }
 
 final class ContentCatalog {
-  const ContentCatalog({
+  ContentCatalog({
     required this.version,
     required this.matchSituations,
     required this.careerEvents,
     required this.lifestyleItems,
-  });
+    WorldDefinition? world,
+  }) : world = world ?? buildLaunchWorld();
 
   /// Decodes a validated remote bundle into the same immutable domain objects
   /// used by the in-app launch catalog. Executable rules never come from this
@@ -231,6 +273,9 @@ final class ContentCatalog {
         orElse: () => throw FormatException('$path has unsupported value.'),
       );
     }
+
+    String countryId(Object? value) =>
+        value == 'unitedStates' ? 'united-states' : value as String;
 
     final metadata = object(bundle['metadata'], 'metadata');
     final situations = list(
@@ -296,6 +341,19 @@ final class ContentCatalog {
             wellnessDelta: choice['wellnessDelta'] as int,
           );
         }).toList(growable: false),
+        previousPerformances: item['previousPerformances'] == null
+            ? PreviousMatchPerformance.values.toSet()
+            : list(item['previousPerformances'], 'previousPerformances')
+                .map(
+                  (value) => named(
+                    PreviousMatchPerformance.values,
+                    value,
+                    'previousPerformance',
+                  ),
+                )
+                .toSet(),
+        previousGameWasHighStakes: item['previousGameWasHighStakes'] as bool?,
+        nextGameIsHighStakes: item['nextGameIsHighStakes'] as bool?,
       );
     }).toList(growable: false);
     final items = list(bundle['lifestyleItems'], 'lifestyleItems').map((raw) {
@@ -317,11 +375,173 @@ final class ContentCatalog {
         wellnessEffect: item['wellnessEffect'] as int,
       );
     }).toList(growable: false);
+    Fixture fixture(Object? raw, String path) {
+      final item = object(raw, path);
+      final decision = item['decision'];
+      return Fixture(
+        id: item['id'] as String,
+        competitionId: item['competitionId'] as String,
+        matchweek: item['matchweek'] as int,
+        homeId: item['homeId'] as String,
+        awayId: item['awayId'] as String,
+        homeGoals: item['homeGoals'] as int?,
+        awayGoals: item['awayGoals'] as int?,
+        decision: decision == null
+            ? FixtureDecision.regulation
+            : named(FixtureDecision.values, decision, '$path.decision'),
+      );
+    }
+
+    final clubItems = list(bundle['clubs'], 'clubs');
+    final clubs = clubItems.map((raw) {
+      final item = object(raw, 'club');
+      return ClubDefinition(
+        id: item['id'] as String,
+        name: item['name'] as String,
+        shortName: item['shortName'] as String,
+        countryId: countryId(item['countryId'] ?? item['nation']),
+        division: named(
+          DivisionLevel.values,
+          item['division'],
+          'club.division',
+        ),
+        quality: item['quality'] as int,
+        attack: item['attack'] as int,
+        defense: item['defense'] as int,
+        primaryColor: item['primaryColor'] as int,
+        secondaryColor: item['secondaryColor'] as int,
+      );
+    }).toList(growable: false);
+    final nationalItems = list(bundle['nationalTeams'], 'nationalTeams');
+    final countryIds = <String>{
+      ...clubs.map((club) => club.countryId),
+      ...nationalItems.map((raw) {
+        final item = object(raw, 'nationalTeam');
+        return item['countryId'] as String? ?? item['id'] as String;
+      }),
+    };
+    final countries = bundle['countries'] is List
+        ? list(bundle['countries'], 'countries').map((raw) {
+            final item = object(raw, 'country');
+            return CountryDefinition(
+              id: item['id'] as String,
+              names: object(item['names'], 'country.names').map(
+                (key, value) => MapEntry(key, value as String),
+              ),
+              region: named(
+                FootballRegion.values,
+                item['region'],
+                'country.region',
+              ),
+              confederation: named(
+                FootballConfederation.values,
+                item['confederation'],
+                'country.confederation',
+              ),
+              mapUnitCodes: list(item['mapUnitCodes'], 'country.mapUnitCodes')
+                  .cast<String>(),
+              leagueRank: item['leagueRank'] as int?,
+              playableLeague: item['playableLeague'] as bool? ?? false,
+            );
+          }).toList(growable: false)
+        : launchCountries
+            .where((country) => countryIds.contains(country.id))
+            .map((country) => CountryDefinition(
+                  id: country.id,
+                  names: country.names,
+                  region: country.region,
+                  confederation: country.confederation,
+                  mapUnitCodes: country.mapUnitCodes,
+                  leagueRank: null,
+                  playableLeague:
+                      clubs.any((club) => club.countryId == country.id),
+                ))
+            .toList(growable: false);
+    CountryDefinition country(String id) =>
+        countries.firstWhere((country) => country.id == id);
+    final nationalTeams = nationalItems.map((raw) {
+      final item = object(raw, 'nationalTeam');
+      final countryId = item['countryId'] as String? ?? item['id'] as String;
+      final countryDefinition = country(countryId);
+      return NationalTeamDefinition(
+        id: item['id'] as String,
+        countryId: countryId,
+        countryName: item['countryName'] as String,
+        region: countryDefinition.region,
+        confederation: countryDefinition.confederation,
+        quality: item['quality'] as int,
+      );
+    }).toList(growable: false);
+    final allLeagueFixtures = list(bundle['fixtures'], 'fixtures')
+        .map((raw) => fixture(raw, 'fixture'))
+        .toList(growable: false);
+    final leagues = list(bundle['leagues'], 'leagues').map((raw) {
+      final item = object(raw, 'league');
+      final id = item['id'] as String;
+      return LeagueDefinition(
+        id: id,
+        name: item['name'] as String,
+        countryId: countryId(item['countryId'] ?? item['nation']),
+        systemRank: item['systemRank'] as int?,
+        division:
+            named(DivisionLevel.values, item['division'], 'league.division'),
+        clubIds: list(item['clubIds'], 'league.clubIds').cast<String>(),
+        fixtures: allLeagueFixtures
+            .where((candidate) => candidate.competitionId == id)
+            .toList(growable: false),
+      );
+    }).toList(growable: false);
+    final cups = list(bundle['domesticCups'], 'domesticCups').map((raw) {
+      final item = object(raw, 'domesticCup');
+      final id = item['id'] as String;
+      final countryId = item['countryId'] as String? ??
+          countries
+              .where((country) => id.startsWith('${country.id}-'))
+              .map((country) => country.id)
+              .first;
+      return CompetitionDefinition(
+        id: id,
+        name: item['name'] as String,
+        kind: CompetitionKind.domesticCup,
+        countryId: countryId,
+        participantIds:
+            list(item['participantIds'], 'cup.participantIds').cast<String>(),
+        fixtures: list(item['openingFixtures'], 'cup.openingFixtures')
+            .map((raw) => fixture(raw, 'cup.fixture'))
+            .toList(growable: false),
+      );
+    }).toList(growable: false);
+    final internationalItem = object(
+      bundle['internationalClubCompetition'],
+      'internationalClubCompetition',
+    );
+    final international = CompetitionDefinition(
+      id: internationalItem['id'] as String,
+      name: internationalItem['name'] as String,
+      kind: CompetitionKind.internationalClub,
+      participantIds: list(
+        internationalItem['participantIds'],
+        'international.participantIds',
+      ).cast<String>(),
+      fixtures: list(internationalItem['fixtures'], 'international.fixtures')
+          .map((raw) => fixture(raw, 'international.fixture'))
+          .toList(growable: false),
+    );
+    final world = WorldDefinition(
+      contentVersion: metadata['releaseVersion'] as String,
+      countries: List.unmodifiable(countries),
+      clubs: List.unmodifiable(clubs),
+      leagues: List.unmodifiable(leagues),
+      domesticCups: List.unmodifiable(cups),
+      internationalClubCompetition: international,
+      nationalTeams: List.unmodifiable(nationalTeams),
+    );
     return ContentCatalog(
       version: metadata['releaseVersion'] as String,
       matchSituations: List.unmodifiable(situations),
       careerEvents: List.unmodifiable(events),
       lifestyleItems: List.unmodifiable(items),
+      world: world,
     );
   }
 
@@ -329,6 +549,7 @@ final class ContentCatalog {
   final List<MatchSituationDefinition> matchSituations;
   final List<CareerEventDefinition> careerEvents;
   final List<LifestyleItemDefinition> lifestyleItems;
+  final WorldDefinition world;
 
   Map<String, Object?> toJson() => {
         'version': version,

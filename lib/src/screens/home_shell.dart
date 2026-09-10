@@ -4,6 +4,7 @@ import '../app_controller.dart';
 import '../game_screen.dart';
 import '../l10n_context.dart';
 import '../theme.dart';
+import '../widgets/compact_player_hud.dart';
 import 'life_screen.dart';
 import 'more_screen.dart';
 import 'world_screen.dart';
@@ -26,12 +27,19 @@ final class _HomeShellState extends State<HomeShell> {
       GameScreen(
         key: ValueKey(career.careerId),
         initialCareer: career,
+        initialFocus: widget.controller.activeWeeklyFocus,
         avatarId: widget.controller.avatarId,
+        rewardModifiers: widget.controller.entitlementState.rewardModifiers,
         contentCatalog: widget.controller.activeContent?.catalog,
+        onFocusPreferenceChanged: widget.controller.changeWeeklyFocus,
         onCareerChanged: (snapshot, eventType) =>
             widget.controller.saveCareer(snapshot, eventType: eventType),
+        onReviewOpportunity: widget.controller.requestReviewAfterSeason,
       ),
-      WorldScreen(career: career),
+      WorldScreen(
+        career: career,
+        definition: widget.controller.activeContent?.catalog.world,
+      ),
       LifeScreen(
         controller: widget.controller,
         contentCatalog: widget.controller.activeContent?.catalog,
@@ -39,7 +47,20 @@ final class _HomeShellState extends State<HomeShell> {
       MoreScreen(controller: widget.controller),
     ];
     return Scaffold(
-      body: IndexedStack(index: _index, children: screens),
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            CompactPlayerHud(
+              career: career,
+              avatarId: widget.controller.avatarId,
+            ),
+            Expanded(
+              child: IndexedStack(index: _index, children: screens),
+            ),
+          ],
+        ),
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         backgroundColor: ElevenwardColors.deep,

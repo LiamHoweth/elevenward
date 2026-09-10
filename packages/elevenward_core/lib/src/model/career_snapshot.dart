@@ -1,7 +1,10 @@
 import 'dart:convert';
 
+import '../world/world_generator.dart';
+import '../world/world_models.dart';
 import 'career_progress.dart';
 import 'career_types.dart';
+import 'enums.dart';
 import 'json_helpers.dart';
 import 'player_state.dart';
 
@@ -42,6 +45,11 @@ final class CareerSnapshot {
     this.sponsorContracts = const [],
     this.resolvedEventIds = const [],
     this.nationalTeam = const NationalTeamCareerState(),
+    this.developmentProgress = const {},
+    this.boostIdsUsed = const [],
+    this.newsFeed = const [],
+    this.transferRequest,
+    this.transferRequestTrustPenaltySeason,
   });
 
   factory CareerSnapshot.newCareer({
@@ -50,9 +58,10 @@ final class CareerSnapshot {
     DateTime? updatedAt,
     String clubId = 'england-northstar-athletic',
     String clubName = 'Northstar Athletic',
-    String contentVersion = '2026.2.0',
+    String contentVersion = '2026.3.0',
     PlayerState? player,
     Difficulty difficulty = Difficulty.professional,
+    WorldDefinition? worldDefinition,
   }) {
     return CareerSnapshot(
       careerId: careerId,
@@ -70,7 +79,7 @@ final class CareerSnapshot {
       player: player ?? PlayerState.developmentStriker(),
       difficulty: difficulty,
       contract: ContractState(clubId: clubId),
-      world: CareerWorldState.initial(),
+      world: CareerWorldState.initial(worldDefinition),
     );
   }
 
@@ -154,6 +163,31 @@ final class CareerSnapshot {
               jsonObject(migrated['nationalTeam'], 'nationalTeam'),
             )
           : const NationalTeamCareerState(),
+      developmentProgress:
+          (migrated['developmentProgress'] as Map<String, Object?>? ?? const {})
+              .map(
+        (key, value) => MapEntry(
+          enumByName(PlayerAttribute.values, key, key),
+          _developmentRemainder(value, key),
+        ),
+      ),
+      boostIdsUsed:
+          (migrated['boostIdsUsed'] as List<Object?>?)?.cast<String>() ??
+              const [],
+      newsFeed: (migrated['newsFeed'] as List<Object?>? ?? const [])
+          .map(
+            (value) => CareerNewsItem.fromJson(
+              (value as Map).cast<String, Object?>(),
+            ),
+          )
+          .toList(growable: false),
+      transferRequest: migrated['transferRequest'] is Map
+          ? TransferRequest.fromJson(
+              (migrated['transferRequest'] as Map).cast<String, Object?>(),
+            )
+          : null,
+      transferRequestTrustPenaltySeason:
+          migrated['transferRequestTrustPenaltySeason'] as int?,
     );
   }
 
@@ -162,8 +196,13 @@ final class CareerSnapshot {
     return CareerSnapshot.fromJson(jsonObject(decoded, 'snapshot'));
   }
 
-  static const currentSchemaVersion = 8;
-  static const currentRulesVersion = '2026.2';
+  static const currentSchemaVersion = 13;
+  static const currentRulesVersion = '2026.4';
+
+  bool get usesExpandedLifeRules =>
+      rulesVersion == '2026.2' ||
+      rulesVersion == '2026.3' ||
+      rulesVersion == currentRulesVersion;
 
   final String careerId;
   final int schemaVersion;
@@ -195,6 +234,11 @@ final class CareerSnapshot {
   final List<SponsorContract> sponsorContracts;
   final List<String> resolvedEventIds;
   final NationalTeamCareerState nationalTeam;
+  final Map<PlayerAttribute, double> developmentProgress;
+  final List<String> boostIdsUsed;
+  final List<CareerNewsItem> newsFeed;
+  final TransferRequest? transferRequest;
+  final int? transferRequestTrustPenaltySeason;
 
   CareerSnapshot copyWith({
     int? seed,
@@ -223,6 +267,13 @@ final class CareerSnapshot {
     List<SponsorContract>? sponsorContracts,
     List<String>? resolvedEventIds,
     NationalTeamCareerState? nationalTeam,
+    Map<PlayerAttribute, double>? developmentProgress,
+    List<String>? boostIdsUsed,
+    List<CareerNewsItem>? newsFeed,
+    TransferRequest? transferRequest,
+    int? transferRequestTrustPenaltySeason,
+    bool clearTransferRequest = false,
+    bool clearTransferRequestTrustPenaltySeason = false,
   }) =>
       CareerSnapshot(
         careerId: careerId,
@@ -255,6 +306,17 @@ final class CareerSnapshot {
         sponsorContracts: sponsorContracts ?? this.sponsorContracts,
         resolvedEventIds: resolvedEventIds ?? this.resolvedEventIds,
         nationalTeam: nationalTeam ?? this.nationalTeam,
+        developmentProgress: developmentProgress ?? this.developmentProgress,
+        boostIdsUsed: boostIdsUsed ?? this.boostIdsUsed,
+        newsFeed: newsFeed ?? this.newsFeed,
+        transferRequest: clearTransferRequest
+            ? null
+            : transferRequest ?? this.transferRequest,
+        transferRequestTrustPenaltySeason:
+            clearTransferRequestTrustPenaltySeason
+                ? null
+                : transferRequestTrustPenaltySeason ??
+                    this.transferRequestTrustPenaltySeason,
       );
 
   String encode() => jsonEncode(toJson());
@@ -291,6 +353,14 @@ final class CareerSnapshot {
             sponsorContracts.map((contract) => contract.toJson()).toList(),
         'resolvedEventIds': resolvedEventIds,
         'nationalTeam': nationalTeam.toJson(),
+        'developmentProgress': {
+          for (final entry in developmentProgress.entries)
+            entry.key.name: entry.value,
+        },
+        'boostIdsUsed': boostIdsUsed,
+        'newsFeed': newsFeed.map((item) => item.toJson()).toList(),
+        'transferRequest': transferRequest?.toJson(),
+        'transferRequestTrustPenaltySeason': transferRequestTrustPenaltySeason,
       };
 
   static Map<String, Object?> _migrateSnapshot(Map<String, Object?> source) {
@@ -328,7 +398,10 @@ final class CareerSnapshot {
       migrated.putIfAbsent('seasonHistory', () => <Object?>[]);
       migrated.putIfAbsent('retired', () => false);
       migrated.putIfAbsent('legacyScore', () => 0);
-      migrated.putIfAbsent('world', () => CareerWorldState.initial().toJson());
+      migrated.putIfAbsent(
+        'world',
+        () => CareerWorldState.initial(buildLegacyLaunchWorld()).toJson(),
+      );
       migrated.putIfAbsent(
         'seasonPerformance',
         () => const SeasonPerformance().toJson(),
@@ -360,6 +433,9 @@ final class CareerSnapshot {
         };
       }
     }
+    if (version < 11) {
+      migrated.putIfAbsent('newsFeed', () => <Object?>[]);
+    }
     if (version < 7) {
       final ids =
           (migrated['sponsorIds'] as List<Object?>? ?? const []).cast<String>();
@@ -380,7 +456,33 @@ final class CareerSnapshot {
         () => const NationalTeamCareerState().toJson(),
       );
     }
+    if (version < 10) {
+      migrated.putIfAbsent(
+        'developmentProgress',
+        () => <String, double>{},
+      );
+      migrated.putIfAbsent('boostIdsUsed', () => <String>[]);
+    }
+    if (version < 13) {
+      migrated.putIfAbsent('transferRequest', () => null);
+      migrated.putIfAbsent('transferRequestTrustPenaltySeason', () => null);
+    }
     migrated['schemaVersion'] = currentSchemaVersion;
     return migrated;
+  }
+
+  static double _developmentRemainder(Object? value, String attribute) {
+    if (value is! num) {
+      throw FormatException(
+        'Development progress for $attribute must be numeric.',
+      );
+    }
+    final result = value.toDouble();
+    if (!result.isFinite || result < 0 || result >= 1) {
+      throw FormatException(
+        'Development progress for $attribute must be between 0 and 1.',
+      );
+    }
+    return result;
   }
 }

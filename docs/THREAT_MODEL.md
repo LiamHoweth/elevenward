@@ -27,7 +27,7 @@ a production environment that has not yet been provisioned or inspected.
 | Account/session tokens | App process to Keychain/Android Keystore | This-device secure-storage accessibility, scoped bearer tokens, expiry/revocation and clearing on sign-out/deletion |
 | Cloud careers | API to isolated PostgreSQL schema | Account ownership on every query, parameterized SQL, revision checks, idempotency and conflict preservation |
 | Content releases | Staff portal/API to private immutable bucket to app | Staff authorization, validation, immutable version/checksum key, Ed25519 signature, same-origin HTTPS retrieval, size limit and exact career-version pinning |
-| Purchase state | Store/RevenueCat to API and local entitlement cache | Stable product mapping, webhook authentication/idempotency, refund/revocation handling and no competitive value |
+| Purchase state | Store/RevenueCat to API and local entitlement cache | Stable product mapping, webhook authentication/idempotency, refund/revocation handling, bounded 1.5×/2×/3× rewards and no valuable leaderboard prizes |
 | Leaderboards | Offline client to public aggregate board | Explicit opt-in, generated aliases, bounded aggregates, plausibility checks, partitioned rules and no prizes/free text |
 | Analytics/error categories | Device to API | Separate explicit consent, allowlisted fields/values, bounded 30-day retry queue, no raw messages/stacks/tokens/paths |
 | Staff/release credentials | Protected CI and infrastructure environments | Least privilege, approval gates, rotation, audit history and no browser/client exposure |
@@ -45,7 +45,7 @@ a production environment that has not yet been provisioned or inspected.
 | Deletion-code guessing or replay | Short expiry, attempt/rate limits, hashed one-time challenge and audit category | Production clock-skew, replay, expiry and provider-revocation drill |
 | Staff portal compromise | Server-side staff gate, action audit and immutable content objects | Replace/bootstrap Basic credentials with managed identity/roles; review session/CSRF policy |
 | RevenueCat webhook forgery/replay | Bearer secret and transaction/idempotency constraints | Sandbox duplicate/delayed/refund/revocation matrix and secret rotation |
-| Modified-device entitlement cache | No gameplay advantage, valuable prize or premium currency; server/store remains authority for restoration | Approve informational vs enforced verification policy before launch |
+| Modified-device entitlement cache | No valuable prize or premium currency; boost usage is submitted as validation evidence and server/store remains authority for restoration | Approve informational vs enforced verification policy before launch |
 | Offline leaderboard cheating | Plausibility checks, bounded aggregate evidence, partitions and no valuable rewards | Production rate/abuse monitoring and manual integrity review |
 | Privacy leakage in diagnostics | Only `area`, exception class category and bounded code are allowed; message and stack are discarded before persistence | Inspect real production payloads/retention/deletion dashboard |
 | Supply-chain or secret exposure | Locked dependencies, dependency audit, gitleaks CI and protected release environment | Exact-revision SAST, binary and secret scans with high findings blocking |
@@ -54,15 +54,17 @@ a production environment that has not yet been provisioned or inspected.
 ## RevenueCat enforcement decision
 
 The source currently uses informational entitlement verification. This preserves
-offline access to two permanent, non-competitive upgrades when a validation
-service is temporarily unavailable. A modified device may forge its local cache;
-that risk is limited to extra local slots and cosmetic presentation. It cannot
-create money, improve attributes, change simulation odds or win a valuable prize.
+offline access to permanent passes when a validation service is temporarily
+unavailable. A modified device may forge its local cache and therefore obtain
+bounded development/income multipliers, slots or cosmetics. It cannot change
+seeded match odds or win a valuable prize. Leaderboard submissions include the
+boost classes used and fractional progress so the backend can validate legitimate
+boosted ranges without splitting the public board.
 
 Launch approval must choose one of these documented policies after sandbox tests:
 
 - Keep informational mode if uninterrupted offline ownership is prioritized and
-  the bounded cosmetic/slot piracy risk is accepted.
+  the bounded pass piracy/leaderboard-integrity risk is accepted.
 - Move to enforced mode only if purchase restoration, grace behavior, refunds and
   long outages remain understandable and never damage existing career data.
 

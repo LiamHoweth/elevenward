@@ -141,24 +141,10 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/elevenward.mobileprovision"
-      - name: Write public client configuration
-        env:
-          GOOGLE_IOS_CLIENT: ${{ secrets.ELEVENWARD_GOOGLE_IOS_CLIENT_ID }}
-          GOOGLE_REVERSED_CLIENT: ${{ secrets.ELEVENWARD_GOOGLE_REVERSED_CLIENT_ID }}
-        run: |
-          {
-            printf 'ELEVENWARD_GOOGLE_IOS_CLIENT_ID = %s\n' "$GOOGLE_IOS_CLIENT"
-            printf 'ELEVENWARD_GOOGLE_REVERSED_CLIENT_ID = %s\n' "$GOOGLE_REVERSED_CLIENT"
-          } > ios/Flutter/Secrets.xcconfig
       - run: flutter pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build signed App Store IPA and symbols
-        env:
-          API_URL: ${{ secrets.ELEVENWARD_API_BASE_URL }}
-          GOOGLE_CLIENT: ${{ secrets.ELEVENWARD_GOOGLE_SERVER_CLIENT_ID }}
-          REVENUECAT_KEY: ${{ secrets.REVENUECAT_IOS_PUBLIC_KEY }}
-          CONTENT_KEY: ${{ secrets.ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64 }}
         run: >-
           flutter build ipa --release
           --build-name=${{ inputs.build_name }}
@@ -166,10 +152,7 @@ jobs:
           --export-options-plist=ios/ExportOptions.plist
           --obfuscate
           --split-debug-info=build/symbols/ios
-          --dart-define=ELEVENWARD_API_BASE_URL="$API_URL"
-          --dart-define=ELEVENWARD_GOOGLE_SERVER_CLIENT_ID="$GOOGLE_CLIENT"
-          --dart-define=REVENUECAT_IOS_PUBLIC_KEY="$REVENUECAT_KEY"
-          --dart-define=ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64="$CONTENT_KEY"
+          --dart-define-from-file=config/production.json
       - uses: actions/upload-artifact@v4
         with:
           name: elevenward-ios-${{ inputs.build_name }}-${{ inputs.build_number }}
