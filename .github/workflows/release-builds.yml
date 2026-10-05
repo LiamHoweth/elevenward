@@ -108,6 +108,8 @@ jobs:
   ios:
     if: inputs.platform == 'both' || inputs.platform == 'ios'
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     environment: elevenward-production
     steps:
       - uses: actions/checkout@v4
