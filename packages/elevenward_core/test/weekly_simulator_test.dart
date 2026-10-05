@@ -83,8 +83,8 @@ void main() {
     expect(safe.chance - bold.chance, greaterThanOrEqualTo(15));
   });
 
-  test('weekly advance trains focus and moves the career forward', () {
-    final snapshot = CareerSnapshot.newCareer();
+  test('published 2026.4 weekly development is preserved', () {
+    final snapshot = _publishedCareer();
     final before = snapshot.player.attributes[PlayerAttribute.finishing];
     final result = simulator.advance(
       snapshot: snapshot,
@@ -230,7 +230,7 @@ void main() {
 
   test('VIP fractional development carries exactly into the next week', () {
     final first = simulator.advance(
-      snapshot: CareerSnapshot.newCareer(seed: 38),
+      snapshot: _publishedCareer(seed: 38),
       choice: choice,
       opponent: opponent,
       updatedAt: updatedAt,
@@ -268,7 +268,7 @@ void main() {
   });
 
   test('2x and 3x profiles apply exact weekly development', () {
-    final snapshot = CareerSnapshot.newCareer(seed: 51);
+    final snapshot = _publishedCareer(seed: 51);
     final doubled = simulator.advance(
       snapshot: snapshot,
       choice: choice,
@@ -359,3 +359,10 @@ void main() {
     expect(() => CareerSnapshot.fromJson(json), throwsFormatException);
   });
 }
+
+CareerSnapshot _publishedCareer({int seed = 110319}) =>
+    CareerSnapshot.fromJson({
+      ...CareerSnapshot.newCareer(seed: seed).toJson(),
+      'rulesVersion': '2026.4',
+      'contentVersion': '2026.3.0'
+    });

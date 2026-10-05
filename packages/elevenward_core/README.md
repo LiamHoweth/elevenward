@@ -14,11 +14,15 @@ The first vertical slice advances one competitive week:
 
 Callers provide every external input, including `updatedAt`. The simulator
 never reads the clock or platform entropy, so an identical snapshot and input
-produce byte-identical canonical JSON on every supported platform.
+produce byte-identical canonical JSON on every supported platform. Gameplay also
+supplies the catalog pinned by `snapshot.contentVersion`; resolve a durable
+`pendingEventId` with `CareerEngine` before advancing again. Role statistics,
+bounded journals, goals, mentor flags and loan ownership persist in the snapshot.
 
 ```dart
 final result = const WeeklySimulator().advance(
   snapshot: snapshot,
+  catalog: contentCatalog,
   choice: const WeeklyChoice(
     focus: PlayerAttribute.finishing,
     intensity: TrainingIntensity.balanced,

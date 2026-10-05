@@ -1,5 +1,10 @@
 # Elevenward product gap audit
 
+Current 2026-10-01 career and online implementation, architecture, and evidence are
+recorded in [FEATURES_2026_10_01.md](FEATURES_2026_10_01.md). The counts and
+verification results below retain the historical 2026-09-05 audit; they do not
+certify the newer rules or deployment state.
+
 Audited 2026-09-05 against the original Elevenward brief, the Flutter game,
 the `howethstudio.com` Next.js project, the isolated Elevenward API surface, and
 the local verification evidence.
@@ -82,7 +87,7 @@ supply-chain/reproducibility gate.
 | Contracts and transfers | Expiry, renewal, role satisfaction, bounded negotiation, reasons, guaranteed free-agency fallbacks, and player-requested next-offseason moves by league/optional club | Balance/native-copy review; loans, midseason moves, and a formal transfer window were not required by the brief |
 | Monetization constraints | Four permanent passes, exact 1.5×/2×/3× development and positive-income profiles, five-slot/cosmetic benefits, localized storefront prices, no random rewards | Real products, store configuration and sandbox qualification |
 | Offline plus optional account/cloud | SQLite snapshot+journal, secure token storage, explicit progress, remote-only download and conflict preservation | Production providers/API and multi-device/outage drills |
-| Prize-free leaderboards | Opt-in, generated aliases, plausibility checks and partitions by position/difficulty/rules | Production abuse monitoring and integrity review |
+| Prize-free leaderboards | Signed-in auto-publication after cloud sync, account-level sharing choice and prior opt-out preservation, moderated usernames with generated alias fallback, in-app report/hide, plausibility checks and partitions by position/difficulty/rules | Production abuse monitoring and integrity review |
 | Signed remote content | Immutable bundles, validation, Ed25519 checks, exact career-version pins, retained verified releases, client/rules compatibility, cache revalidation, publish and rollback | Production keys/bucket and an observed rollback drill |
 | Analytics and error reporting | Explicit consent, bounded retry queue, server allowlist and message/stack/token-free error taxonomy | Production delivery/retention dashboard and privacy approval |
 | Four-language website | Marketing, support, privacy, deletion, press downloads and admin are implemented in the existing site | Deployment plus native/legal review and approved screenshots |

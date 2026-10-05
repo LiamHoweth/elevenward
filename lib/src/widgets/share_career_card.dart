@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../l10n_context.dart';
+import '../marketing_links.dart';
+import '../player_portraits.dart';
 import '../theme.dart';
 import '../ui_copy.dart';
 
@@ -17,11 +19,13 @@ final class ShareCareerCard extends StatefulWidget {
     required this.career,
     required this.styleId,
     required this.avatarId,
+    this.marketingLinks = const StudioMarketingLinks.fromEnvironment(),
   });
 
   final CareerSnapshot career;
   final String styleId;
   final String avatarId;
+  final StudioMarketingLinks marketingLinks;
 
   @override
   State<ShareCareerCard> createState() => _ShareCareerCardState();
@@ -34,12 +38,13 @@ final class _ShareCareerCardState extends State<ShareCareerCard> {
   Future<void> _share() async {
     if (_sharing) return;
     setState(() => _sharing = true);
+    ui.Image? image;
     try {
       final boundary = _boundaryKey.currentContext?.findRenderObject();
       if (boundary is! RenderRepaintBoundary) {
         throw StateError('Share card is not ready.');
       }
-      final image = await boundary.toImage(pixelRatio: 3);
+      image = await boundary.toImage(pixelRatio: 3);
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) throw StateError('Share card could not be rendered.');
       final directory = await getTemporaryDirectory();
@@ -64,15 +69,26 @@ final class _ShareCareerCardState extends State<ShareCareerCard> {
             'Carrière Elevenward',
           ),
           subject: '${widget.career.player.name} — Elevenward',
-          text:
-              '${widget.career.player.name} · ${widget.career.clubName} · '
-              '${widget.career.player.overall} OVR',
+          text: careerShareText(
+            widget.career,
+            locale: contentLocale(context),
+            links: widget.marketingLinks,
+          ),
           files: [XFile(file.path, mimeType: 'image/png')],
           fileNameOverrides: ['elevenward-career.png'],
           sharePositionOrigin: origin,
         ),
       );
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(uiCopy(contentLocale(context), 'shareCareerFailed')),
+          ),
+        );
+      }
     } finally {
+      image?.dispose();
       if (mounted) setState(() => _sharing = false);
     }
   }
@@ -84,10 +100,21 @@ final class _ShareCareerCardState extends State<ShareCareerCard> {
         key: _boundaryKey,
         child: AspectRatio(
           aspectRatio: 4 / 5,
-          child: _CareerCard(
-            career: widget.career,
-            styleId: widget.styleId,
-            avatarId: widget.avatarId,
+          // The exported graphic has a stable canvas and a complete spoken
+          // summary. Surrounding controls retain the player's text scaling.
+          child: FittedBox(
+            child: SizedBox(
+              width: 360,
+              height: 450,
+              child: MediaQuery.withNoTextScaling(
+                child: _CareerCard(
+                  career: widget.career,
+                  styleId: widget.styleId,
+                  avatarId: widget.avatarId,
+                  marketingLinks: widget.marketingLinks,
+                ),
+              ),
+            ),
           ),
         ),
       ),
@@ -111,24 +138,27 @@ final class _CareerCard extends StatelessWidget {
     required this.career,
     required this.styleId,
     required this.avatarId,
+    required this.marketingLinks,
   });
 
   final CareerSnapshot career;
   final String styleId;
   final String avatarId;
+  final StudioMarketingLinks marketingLinks;
 
   @override
   Widget build(BuildContext context) {
+    final portraitAsset = playerPortraitAsset(career.player.portraitId);
     final colors = switch (styleId) {
       'stadium' => (
         const Color(0xFF061D2B),
-        ElevenwardColors.sky,
+        ElevenwardPalette.dark.info,
         const Color(0xFFBFE9F8),
       ),
       'editorial' => (
         const Color(0xFFF3F0E5),
-        const Color(0xFFEA5741),
-        ElevenwardColors.ink,
+        ElevenwardPalette.light.danger,
+        const Color(0xFF17191D),
       ),
       'midnight' => (
         const Color(0xFF140B29),
@@ -148,13 +178,16 @@ final class _CareerCard extends StatelessWidget {
     final seasons = career.seasonHistory.length + (career.retired ? 0 : 1);
     return Semantics(
       image: true,
-      label: _shareLabel(
-        contentLocale(context),
-        '${career.player.name} Elevenward career summary',
-        'Resumen de la carrera de ${career.player.name} en Elevenward',
-        'Resumo da carreira de ${career.player.name} no Elevenward',
-        'Résumé de carrière Elevenward de ${career.player.name}',
-      ),
+      excludeSemantics: true,
+      label:
+          '${career.player.name} — Elevenward. ${career.clubName}. '
+          '${localizedPosition(contentLocale(context), career.player.position.name)}. '
+          '${career.player.overall} OVR. '
+          '$seasons ${_shareLabel(contentLocale(context), 'seasons', 'temporadas', 'temporadas', 'saisons')}. '
+          '${career.player.goals} ${uiCopy(contentLocale(context), 'goals')}. '
+          '$trophies ${_shareLabel(contentLocale(context), 'trophies', 'trofeos', 'troféus', 'trophées')}. '
+          '${career.retired ? '${uiCopy(contentLocale(context), 'legacy')} ${career.legacyScore}' : '${uiCopy(contentLocale(context), 'season')} ${career.season}, ${uiCopy(contentLocale(context), 'week')} ${career.week}'}. '
+          '${marketingLinks.productDisplayUrl ?? ''}',
       child: Container(
         clipBehavior: Clip.antiAlias,
         decoration: BoxDecoration(
@@ -195,10 +228,10 @@ final class _CareerCard extends StatelessWidget {
                             color: colors.$2,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Icon(
-                            Icons.north_east_rounded,
-                            color: colors.$1,
-                            size: 20,
+                          child: Image.asset(
+                            'assets/branding/graphite/elevenward-11-ui.png',
+                            fit: BoxFit.cover,
+                            excludeFromSemantics: true,
                           ),
                         ),
                         const SizedBox(width: 10),
@@ -223,11 +256,20 @@ final class _CareerCard extends StatelessWidget {
                         color: colors.$2.withValues(alpha: .16),
                         border: Border.all(color: colors.$2),
                       ),
-                      child: Icon(
-                        elevenwardAvatarIcon(avatarId),
-                        color: colors.$2,
-                        size: 30,
-                      ),
+                      child: portraitAsset != null
+                          ? ClipOval(
+                              child: Image.asset(
+                                portraitAsset,
+                                fit: BoxFit.cover,
+                                alignment: Alignment.topCenter,
+                                excludeFromSemantics: true,
+                              ),
+                            )
+                          : Icon(
+                              elevenwardAvatarIcon(avatarId),
+                              color: colors.$2,
+                              size: 30,
+                            ),
                     ),
                     Text(
                       career.retired
@@ -267,7 +309,7 @@ final class _CareerCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '${career.clubName} · ${career.player.position.name.toUpperCase()}',
+                      '${career.clubName} · ${localizedPosition(contentLocale(context), career.player.position.name).toUpperCase()}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -329,6 +371,15 @@ final class _CareerCard extends StatelessWidget {
                         letterSpacing: .8,
                       ),
                     ),
+                    if (marketingLinks.productDisplayUrl case final url?) ...[
+                      const SizedBox(height: 7),
+                      Text(
+                        url,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: colors.$3, fontSize: 10),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -338,6 +389,20 @@ final class _CareerCard extends StatelessWidget {
       ),
     );
   }
+}
+
+String careerShareText(
+  CareerSnapshot career, {
+  required String locale,
+  required StudioMarketingLinks links,
+}) {
+  final summary =
+      '${career.player.name} · ${career.clubName} · '
+      '${career.player.overall} OVR — Elevenward';
+  final uri = links.careerShareUrl;
+  return uri == null
+      ? summary
+      : '$summary\n${uiCopy(locale, 'discoverElevenward')}: $uri';
 }
 
 String _shareLabel(

@@ -53,7 +53,7 @@ final class ShopScreen extends StatelessWidget {
                     foregroundColor: ElevenwardColors.cream,
                     disabledBackgroundColor: ElevenwardColors.panel,
                     disabledForegroundColor: ElevenwardColors.muted,
-                    side: const BorderSide(color: ElevenwardColors.line),
+                    side: BorderSide(color: ElevenwardColors.line),
                   ),
                   onPressed: controller.busy
                       ? null
@@ -109,7 +109,7 @@ final class ShopScreen extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(4, 8, 4, 12),
                   child: Text(
                     uiCopy(locale, 'shopOptions'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: ElevenwardColors.muted,
                       fontSize: 11,
                       fontWeight: FontWeight.w900,
@@ -152,17 +152,17 @@ final class _ShopHero extends StatelessWidget {
       padding: const EdgeInsets.all(ElevenwardSpacing.lg),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF193222), ElevenwardColors.panel],
+          colors: [ElevenwardColors.grassDark, ElevenwardColors.panel],
         ),
         borderRadius: BorderRadius.circular(ElevenwardRadii.hero),
         border: Border.all(color: ElevenwardColors.line),
       ),
       child: Stack(
         children: [
-          const Positioned(
+          Positioned(
             right: -34,
             top: -42,
             child: _AtmosphereOrb(
@@ -179,21 +179,22 @@ final class _ShopHero extends StatelessWidget {
                   Container(
                     width: 34,
                     height: 34,
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      color: ElevenwardColors.grass,
+                      color: ElevenwardColors.panel,
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    child: const Icon(
-                      Icons.north_east_rounded,
-                      size: 20,
-                      color: ElevenwardColors.ink,
+                    child: Image.asset(
+                      'assets/branding/graphite/elevenward-11-ui.png',
+                      fit: BoxFit.cover,
+                      excludeFromSemantics: true,
                     ),
                   ),
                   const SizedBox(width: ElevenwardSpacing.sm),
                   Expanded(
                     child: Text(
                       uiCopy(locale, 'shopEyebrow'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: ElevenwardColors.grass,
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
@@ -235,7 +236,7 @@ final class _StackingExplainer extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.layers_rounded, color: ElevenwardColors.grass),
+              Icon(Icons.layers_rounded, color: ElevenwardColors.grass),
               const SizedBox(width: ElevenwardSpacing.sm),
               Expanded(
                 child: Column(
@@ -333,7 +334,7 @@ final class _EquationMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     value,
-    style: const TextStyle(
+    style: TextStyle(
       color: ElevenwardColors.muted,
       fontSize: 18,
       fontWeight: FontWeight.w900,
@@ -418,10 +419,28 @@ final class _GamePassCard extends StatelessWidget {
               ? const DecorationImage(
                   image: AssetImage('assets/visual/shop-all-access.png'),
                   fit: BoxFit.cover,
-                  colorFilter: ColorFilter.mode(
-                    Color(0xB307110C),
-                    BlendMode.srcOver,
-                  ),
+                  colorFilter: ColorFilter.matrix([
+                    .18,
+                    .32,
+                    .10,
+                    0,
+                    0,
+                    .18,
+                    .32,
+                    .10,
+                    0,
+                    0,
+                    .18,
+                    .32,
+                    .10,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    1,
+                    0,
+                  ]),
                 )
               : null,
           borderRadius: BorderRadius.circular(ElevenwardRadii.hero),
@@ -683,7 +702,7 @@ final class _StoreNotice extends StatelessWidget {
     final message = Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.info_outline_rounded, color: ElevenwardColors.amber),
+        Icon(Icons.info_outline_rounded, color: ElevenwardColors.amber),
         const SizedBox(width: 12),
         Expanded(child: Text(text)),
       ],
@@ -707,10 +726,7 @@ final class _StoreNotice extends StatelessWidget {
           : Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
-                  Icons.info_outline_rounded,
-                  color: ElevenwardColors.amber,
-                ),
+                Icon(Icons.info_outline_rounded, color: ElevenwardColors.amber),
                 const SizedBox(width: 12),
                 Expanded(child: Text(text)),
                 TextButton(

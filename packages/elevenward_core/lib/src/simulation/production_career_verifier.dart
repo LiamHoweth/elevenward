@@ -1,5 +1,5 @@
 import '../content/content_catalog.dart';
-import '../content/content_models.dart';
+import '../model/career_features.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
 import '../model/enums.dart';
@@ -29,6 +29,7 @@ final class ProductionCareerVerificationReport {
     required this.rewardProfileCounts,
     required this.failures,
     required this.checksum,
+    this.featureCounts = const {},
   });
 
   final int careers;
@@ -46,6 +47,7 @@ final class ProductionCareerVerificationReport {
   final Map<String, int> rewardProfileCounts;
   final List<String> failures;
   final String checksum;
+  final Map<String, int> featureCounts;
 
   bool get passed => failures.isEmpty;
 
@@ -67,6 +69,7 @@ final class ProductionCareerVerificationReport {
         'failures': failures,
         'checksum': checksum,
         'passed': passed,
+        'featureCounts': featureCounts,
       };
 }
 
@@ -87,7 +90,15 @@ final class ProductionCareerVerifier {
     if (careers < 1) throw ArgumentError.value(careers, 'careers');
     if (startIndex < 0) throw ArgumentError.value(startIndex, 'startIndex');
     final world = buildLaunchWorld();
-    final catalog = buildLaunchContent();
+    final catalog = buildLatestContent();
+    final features = <String, int>{
+      'mentorCompleted': 0,
+      'loanStarted': 0,
+      'loanReturned': 0,
+      'goalCompleted': 0,
+      'journalRoundTrips': 0,
+      'roleContributions': 0
+    };
     final positions = <String, int>{};
     final archetypes = <String, int>{};
     final difficulties = <String, int>{};
@@ -195,6 +206,11 @@ final class ProductionCareerVerifier {
               world.nationalTeams[index % world.nationalTeams.length].id,
         ),
       );
+      snapshot = _engine.chooseCareerGoal(
+          snapshot: snapshot,
+          kind: CareerGoalKind.appearances,
+          target: 25,
+          updatedAt: snapshot.updatedAt);
       final startingClub = snapshot.clubId;
       try {
         while (!snapshot.retired) {
@@ -241,20 +257,38 @@ final class ProductionCareerVerifier {
                   updatedAt: snapshot.updatedAt.add(const Duration(days: 7)),
                   modifiers: modifiers,
                   definition: world,
+                  catalog: catalog,
                 )
                 .snapshot;
-            final events =
-                wasClubSeason && snapshot.phase == CareerPhase.inSeason
-                    ? _engine.eligibleEvents(snapshot, catalog)
-                    : const <CareerEventDefinition>[];
-            if (events.isEmpty) {
+            if (wasClubSeason && snapshot.matchJournal.isNotEmpty) {
+              final receipt = snapshot.matchJournal.first;
+              final teamGoals =
+                  receipt.isHome ? receipt.homeScore : receipt.awayScore;
+              if (receipt.goals + receipt.assists > teamGoals)
+                throw StateError('Personal contributions exceed team goals.');
+            }
+            if (snapshot.matchJournal.length > 40)
+              throw StateError('Journal bound exceeded.');
+            if (snapshot.week % 6 == 0) {
+              final encoded = snapshot.encode();
+              snapshot = CareerSnapshot.decode(encoded);
+              if (snapshot.encode() != encoded)
+                throw StateError('Journal reload changed durable state.');
+              features['journalRoundTrips'] =
+                  features['journalRoundTrips']! + 1;
+            }
+            final event = _engine.pendingEvent(snapshot, catalog);
+            if (event == null) {
               weeks += 1;
               continue;
             }
-            final event = events[
-                (snapshot.seed ^ snapshot.revision).abs() % events.length];
-            final choice = event.choices[
-                (snapshot.seed + snapshot.week) % event.choices.length];
+            final affordable = event.choices
+                .where((choice) =>
+                    choice.moneyDelta >= 0 ||
+                    snapshot.player.money >= -choice.moneyDelta)
+                .toList();
+            final choice =
+                affordable[(snapshot.seed + snapshot.week) % affordable.length];
             snapshot = _engine.applyEventChoice(
               snapshot: snapshot,
               event: event,
@@ -283,11 +317,27 @@ final class ProductionCareerVerifier {
             final offers = _engine.contractOffers(snapshot, definition: world);
             if (offers.isNotEmpty) offer = offers.first;
           }
+          LoanOffer? loan;
+          if (snapshot.season != targetRetirementSeason &&
+              index % 5 == 0 &&
+              snapshot.season % 3 == 0) {
+            final loans = _engine.loanOffers(snapshot, definition: world);
+            if (loans.isNotEmpty) {
+              loan = loans.first;
+              offer = null;
+              features['loanStarted'] = features['loanStarted']! + 1;
+            }
+          }
+          if (snapshot.activeLoan != null) {
+            offer = null;
+            features['loanReturned'] = features['loanReturned']! + 1;
+          }
           final beforeClub = snapshot.clubId;
           final beforeLeague = snapshot.world.leagueIdForClub(beforeClub);
           snapshot = _engine.completeOffseason(
             snapshot,
             acceptedOffer: offer,
+            acceptedLoan: loan,
             retire: snapshot.season == targetRetirementSeason,
             definition: world,
             updatedAt: snapshot.updatedAt.add(const Duration(days: 21)),
@@ -335,6 +385,15 @@ final class ProductionCareerVerifier {
           (value) => value + 1,
           ifAbsent: () => 1,
         );
+        if (snapshot.storyFlags['mentor.stage'] == '3')
+          features['mentorCompleted'] = features['mentorCompleted']! + 1;
+        if (snapshot.careerGoal?.completed ?? false)
+          features['goalCompleted'] = features['goalCompleted']! + 1;
+        if (snapshot.roleStats
+            .toJson()
+            .values
+            .any((value) => value is int && value > 0))
+          features['roleContributions'] = features['roleContributions']! + 1;
         checksum = _mixString(checksum, snapshot.encode());
         checksum = _mixString(checksum, startingClub);
       } on Object catch (error) {
@@ -344,6 +403,7 @@ final class ProductionCareerVerifier {
     }
 
     return ProductionCareerVerificationReport(
+      featureCounts: features,
       careers: careers,
       startIndex: startIndex,
       weeks: weeks,

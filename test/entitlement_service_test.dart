@@ -26,12 +26,15 @@ void main() {
     expect(state.premiumCosmetics, isTrue);
   });
 
-  test('VIP and 2x development produce 3x training in gameplay', () {
+  test('legacy VIP and 2x development preserve exact 3x training', () {
     const state = EntitlementState(
       ownedPasses: {GamePassId.vip, GamePassId.doubleDevelopment},
     );
     final result = const WeeklySimulator().advance(
-      snapshot: CareerSnapshot.newCareer(seed: 51),
+      snapshot: CareerSnapshot.fromJson({
+        ...CareerSnapshot.newCareer(seed: 51).toJson(),
+        'rulesVersion': '2026.4',
+      }),
       choice: const WeeklyChoice(
         focus: PlayerAttribute.finishing,
         intensity: TrainingIntensity.balanced,

@@ -26,6 +26,7 @@ final class CompactPlayerHud extends StatelessWidget {
         PlayerIdentityBadge(
           playerName: career.player.name,
           avatarId: avatarId,
+          portraitId: career.player.portraitId,
           size: 36,
         ),
         const SizedBox(width: 10),
@@ -38,7 +39,7 @@ final class CompactPlayerHud extends StatelessWidget {
                 career.player.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: ElevenwardColors.cream,
                   fontSize: 14,
                   fontWeight: FontWeight.w900,
@@ -48,7 +49,7 @@ final class CompactPlayerHud extends StatelessWidget {
                 career.clubName,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   color: ElevenwardColors.muted,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
@@ -68,7 +69,7 @@ final class CompactPlayerHud extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.fade,
             softWrap: false,
-            style: const TextStyle(
+            style: TextStyle(
               color: ElevenwardColors.muted,
               fontSize: 10,
               fontWeight: FontWeight.w800,
@@ -81,7 +82,7 @@ final class CompactPlayerHud extends StatelessWidget {
           child: Text(
             '£${career.player.money}',
             maxLines: 1,
-            style: const TextStyle(
+            style: TextStyle(
               color: ElevenwardColors.grass,
               fontSize: 14,
               fontWeight: FontWeight.w900,
@@ -98,7 +99,7 @@ final class CompactPlayerHud extends StatelessWidget {
       child: Container(
         constraints: BoxConstraints(minHeight: accessible ? 78 : 56),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: ElevenwardColors.line)),
         ),
         child: accessible

@@ -55,6 +55,25 @@ void main() {
     }
   });
 
+  test('selected portrait survives player updates and career serialization',
+      () {
+    final player = PlayerState.newCareer(
+      id: 'portrait-player',
+      name: 'Portrait Player',
+      archetype: Archetype.poacher,
+      portraitId: 'player_21',
+    );
+    final career = CareerSnapshot.newCareer(player: player.copyWith(age: 18));
+    final restored = CareerSnapshot.decode(career.encode());
+    expect(restored.player.portraitId, 'player_21');
+    expect(restored.player.age, 18);
+
+    final legacyJson = Map<String, Object?>.from(player.toJson())
+      ..remove('portraitId');
+    expect(PlayerState.fromJson(legacyJson).portraitId, isNull);
+    expect(PlayerState.fromJson(legacyJson).toJson(), legacyJson);
+  });
+
   test('new careers bind the contract and active content to the chosen club',
       () {
     final snapshot = CareerSnapshot.newCareer(

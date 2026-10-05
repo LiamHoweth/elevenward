@@ -1,6 +1,25 @@
 import 'enums.dart';
 import 'json_helpers.dart';
 
+/// A starting suggestion only; a saved player choice always takes precedence.
+PlayerAttribute recommendedTrainingFocus(Archetype archetype) =>
+    switch (archetype) {
+      Archetype.poacher ||
+      Archetype.invertedWinger =>
+        PlayerAttribute.finishing,
+      Archetype.targetForward => PlayerAttribute.strength,
+      Archetype.completeForward => PlayerAttribute.technique,
+      Archetype.touchlineWinger ||
+      Archetype.attackingFullback =>
+        PlayerAttribute.pace,
+      Archetype.wideCreator ||
+      Archetype.playmaker ||
+      Archetype.ballPlayingCentreBack =>
+        PlayerAttribute.passing,
+      Archetype.boxToBox => PlayerAttribute.stamina,
+      Archetype.ballWinner || Archetype.stopper => PlayerAttribute.defending,
+    };
+
 /// Immutable values for the eight attributes shown in the game UI.
 final class PlayerAttributes {
   PlayerAttributes(Map<PlayerAttribute, int> values)

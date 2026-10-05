@@ -44,7 +44,8 @@ final class ContentService {
        // ignore: prefer_initializing_formals
        _publicKeyBase64 = publicKeyBase64;
 
-  static const bundledAsset = 'assets/content/launch-2026.3.0.json';
+  static const bundledAsset = 'assets/content/launch-2026.4.0.json';
+  static const _previousBundledAsset = 'assets/content/launch-2026.3.0.json';
   static const _legacyBundledAsset = 'assets/content/launch-2026.2.0.json';
   static const executableRulesVersion = CareerSnapshot.currentRulesVersion;
   static const _cacheKey = 'content.verified.bundle';
@@ -100,6 +101,8 @@ final class ContentService {
   Future<ActiveContent> _loadBundled({String? versionAlias}) async {
     final asset = versionAlias == '2026.1.0' || versionAlias == '2026.2.0'
         ? _legacyBundledAsset
+        : versionAlias == '2026.3.0'
+        ? _previousBundledAsset
         : bundledAsset;
     final source = await rootBundle.loadString(asset);
     final bundle = (jsonDecode(source) as Map).cast<String, Object?>();
@@ -163,6 +166,7 @@ final class ContentService {
       final verified = await _verify(
         utf8.encode(cached['body'] as String),
         (cached['manifest'] as Map).cast<String, Object?>(),
+        allowPreviousRules: true,
       );
       return verified.version == requiredVersion ? verified : null;
     } on Object {
@@ -192,8 +196,9 @@ final class ContentService {
 
   Future<ActiveContent> _verify(
     List<int> bytes,
-    Map<String, Object?> manifest,
-  ) async {
+    Map<String, Object?> manifest, {
+    bool allowPreviousRules = false,
+  }) async {
     if (bytes.length > _maximumBytes ||
         manifest['signatureAlgorithm'] != 'Ed25519') {
       throw const FormatException('Invalid content envelope.');
@@ -225,7 +230,10 @@ final class ContentService {
       );
     }
     final metadata = (bundle['metadata'] as Map).cast<String, Object?>();
-    if (metadata['rulesVersion'] != executableRulesVersion) {
+    const previousRules = {'2026.1', '2026.2', '2026.3', '2026.4'};
+    if (metadata['rulesVersion'] != executableRulesVersion &&
+        !(allowPreviousRules &&
+            previousRules.contains(metadata['rulesVersion']))) {
       throw const FormatException(
         'Remote content cannot replace executable rules.',
       );

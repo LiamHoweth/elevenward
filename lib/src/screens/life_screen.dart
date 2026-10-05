@@ -2,6 +2,7 @@ import 'package:elevenward_core/elevenward_core.dart';
 import 'package:flutter/material.dart';
 
 import '../app_controller.dart';
+import '../feature_copy.dart';
 import '../l10n_context.dart';
 import '../theme.dart';
 import '../ui_copy.dart';
@@ -72,7 +73,7 @@ final class _LifeScreenState extends State<LifeScreen> {
           color: ElevenwardColors.panel,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(ElevenwardRadii.card),
-            side: const BorderSide(color: ElevenwardColors.line),
+            side: BorderSide(color: ElevenwardColors.line),
           ),
           clipBehavior: Clip.antiAlias,
           child: Column(
@@ -122,7 +123,7 @@ final class _LifeScreenState extends State<LifeScreen> {
               const Divider(height: 1),
               _LifeActionTile(
                 key: const Key('life-action-market'),
-                leading: const _ActionIcon(
+                leading: _ActionIcon(
                   icon: Icons.storefront_outlined,
                   color: ElevenwardColors.amber,
                 ),
@@ -133,7 +134,7 @@ final class _LifeScreenState extends State<LifeScreen> {
               const Divider(height: 1),
               _LifeActionTile(
                 key: const Key('life-action-collection'),
-                leading: const _ActionIcon(
+                leading: _ActionIcon(
                   icon: Icons.inventory_2_outlined,
                   color: ElevenwardColors.sky,
                 ),
@@ -145,12 +146,16 @@ final class _LifeScreenState extends State<LifeScreen> {
               const Divider(height: 1),
               _LifeActionTile(
                 key: const Key('life-action-national-team'),
-                leading: const _ActionIcon(
+                leading: _ActionIcon(
                   icon: Icons.flag_outlined,
                   color: ElevenwardColors.grass,
                 ),
                 title: context.l10n.nationalTeam,
-                subtitle: _nationalStatus(career, locale),
+                subtitle: _nationalStatus(
+                  career,
+                  locale,
+                  definition: widget.contentCatalog?.world,
+                ),
                 badge: invitation ? '!' : '${career.nationalTeam.caps}',
                 onTap: () => _open(LifeDestination.nationalTeam),
               ),
@@ -235,7 +240,8 @@ final class _LifePulseStrip extends StatelessWidget {
       builder: (context, constraints) {
         final largeText = MediaQuery.textScalerOf(context).scale(12) >= 17;
         final columns = largeText ? 2 : 4;
-        final width = constraints.maxWidth / columns;
+        // The border consumes one logical pixel on each side of the Wrap.
+        final width = (constraints.maxWidth - 2) / columns;
         return Container(
           key: const Key('life-pulse-strip'),
           decoration: BoxDecoration(
@@ -290,16 +296,13 @@ final class _PulseMetric extends StatelessWidget {
           const SizedBox(height: 4),
           Text(
             value,
-            maxLines: 1,
             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 2),
           Text(
             label,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
-            style: const TextStyle(
+            style: TextStyle(
               color: ElevenwardColors.muted,
               fontSize: 9,
               height: 1.15,
@@ -327,11 +330,11 @@ final class _AttentionTile extends StatelessWidget {
     color: ElevenwardColors.amber.withValues(alpha: .12),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(16),
-      side: const BorderSide(color: ElevenwardColors.amber),
+      side: BorderSide(color: ElevenwardColors.amber),
     ),
     child: ListTile(
       minVerticalPadding: 10,
-      leading: const Icon(
+      leading: Icon(
         Icons.notification_important_outlined,
         color: ElevenwardColors.amber,
       ),
@@ -360,18 +363,17 @@ final class _LifeActionTile extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-    minVerticalPadding: 8,
-    leading: leading,
-    title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-    subtitle: Text(
+  Widget build(BuildContext context) {
+    final heading = Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium
+          ?.copyWith(fontWeight: FontWeight.w900),
+    );
+    final detail = Text(
       subtitle,
-      maxLines: 2,
-      overflow: TextOverflow.ellipsis,
-      style: const TextStyle(color: ElevenwardColors.muted, fontSize: 11),
-    ),
-    trailing: Row(
+      style: TextStyle(color: ElevenwardColors.muted, fontSize: 11),
+    );
+    final trailing = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (badge != null)
@@ -383,7 +385,7 @@ final class _LifeActionTile extends StatelessWidget {
             ),
             child: Text(
               badge!,
-              style: const TextStyle(
+              style: TextStyle(
                 color: ElevenwardColors.grass,
                 fontSize: 10,
                 fontWeight: FontWeight.w900,
@@ -393,9 +395,38 @@ final class _LifeActionTile extends StatelessWidget {
         const SizedBox(width: 3),
         const Icon(Icons.chevron_right_rounded),
       ],
-    ),
-    onTap: onTap,
-  );
+    );
+    if (MediaQuery.textScalerOf(context).scale(14) >= 21) {
+      return Semantics(
+        button: true,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(children: [leading, const Spacer(), trailing]),
+                const SizedBox(height: 10),
+                heading,
+                const SizedBox(height: 5),
+                detail,
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      minVerticalPadding: 8,
+      leading: leading,
+      title: heading,
+      subtitle: detail,
+      trailing: trailing,
+      onTap: onTap,
+    );
+  }
 }
 
 final class _ActionIcon extends StatelessWidget {
@@ -424,7 +455,7 @@ final class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
     label.toUpperCase(),
-    style: const TextStyle(
+    style: TextStyle(
       color: ElevenwardColors.grass,
       fontSize: 11,
       fontWeight: FontWeight.w900,
@@ -444,6 +475,7 @@ final class _AgentScreen extends StatefulWidget {
 
 final class _AgentScreenState extends State<_AgentScreen> {
   static const _engine = CareerEngine();
+  bool _busy = false;
 
   @override
   Widget build(BuildContext context) {
@@ -495,7 +527,7 @@ final class _AgentScreenState extends State<_AgentScreen> {
                             agent.monthlyFee == 0
                                 ? uiCopy(locale, 'free')
                                 : '£${agent.monthlyFee} ${uiCopy(locale, 'monthlyRetainer')}',
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: ElevenwardColors.amber,
                               fontWeight: FontWeight.w900,
                             ),
@@ -504,7 +536,7 @@ final class _AgentScreenState extends State<_AgentScreen> {
                       ),
                     ),
                     if (active)
-                      const Icon(
+                      Icon(
                         Icons.verified_rounded,
                         color: ElevenwardColors.grass,
                       ),
@@ -513,11 +545,11 @@ final class _AgentScreenState extends State<_AgentScreen> {
                 const SizedBox(height: 12),
                 Text(
                   localizedAgentDescription(locale, agent),
-                  style: const TextStyle(color: ElevenwardColors.muted),
+                  style: TextStyle(color: ElevenwardColors.muted),
                 ),
                 const SizedBox(height: 12),
                 FilledButton.tonalIcon(
-                  onPressed: active ? null : () => _confirm(agent),
+                  onPressed: active || _busy ? null : () => _confirm(agent),
                   icon: Icon(
                     active ? Icons.check_rounded : Icons.handshake_outlined,
                   ),
@@ -536,39 +568,56 @@ final class _AgentScreenState extends State<_AgentScreen> {
   }
 
   Future<void> _confirm(AgentDefinition agent) async {
+    if (_busy) return;
     final locale = contentLocale(context);
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(uiCopy(locale, 'changeAgent')),
-        content: Text(
-          '${localizedAgentName(locale, agent.id)} · '
-          '${agent.monthlyFee == 0 ? uiCopy(locale, 'free') : '£${agent.monthlyFee} ${uiCopy(locale, 'monthlyRetainer')}'}\n\n'
-          '${uiCopy(locale, 'changeAgentBody')}',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(context.l10n.close),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(uiCopy(locale, 'selectAgent')),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
     final current = widget.controller.activeCareer!;
-    final next = _engine.chooseAgent(
-      snapshot: current,
-      agentId: agent.id,
-      updatedAt: DateTime.now().toUtc(),
-    );
-    if (!identical(next, current)) {
-      await widget.controller.saveCareer(next, eventType: 'agent_changed');
+    final generation = widget.controller.activeCareerGeneration;
+    setState(() => _busy = true);
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(uiCopy(locale, 'changeAgent')),
+          content: Text(
+            '${localizedAgentName(locale, agent.id)} · '
+            '${agent.monthlyFee == 0 ? uiCopy(locale, 'free') : '£${agent.monthlyFee} ${uiCopy(locale, 'monthlyRetainer')}'}\n\n'
+            '${uiCopy(locale, 'changeAgentBody')}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(context.l10n.close),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(uiCopy(locale, 'selectAgent')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      final next = _engine.chooseAgent(
+        snapshot: current,
+        agentId: agent.id,
+        updatedAt: DateTime.now().toUtc(),
+      );
+      if (!identical(next, current)) {
+        await widget.controller.saveCareer(
+          next,
+          eventType: 'agent_changed',
+          expectedGeneration: generation,
+          expectedCareerId: current.careerId,
+          expectedRevision: current.revision,
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(context.l10n.errorTryAgain)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
     }
-    if (mounted) setState(() {});
   }
 }
 
@@ -608,11 +657,11 @@ final class _SponsorScreen extends StatelessWidget {
                     children: [
                       Text(
                         uiCopy(locale, 'weeklySponsors'),
-                        style: const TextStyle(color: ElevenwardColors.muted),
+                        style: TextStyle(color: ElevenwardColors.muted),
                       ),
                       Text(
                         '+£$total',
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: ElevenwardColors.amber,
                           fontSize: 24,
                           fontWeight: FontWeight.w900,
@@ -638,7 +687,7 @@ final class _SponsorScreen extends StatelessWidget {
                 child: _DetailCard(
                   child: ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(
+                    leading: Icon(
                       Icons.handshake_outlined,
                       color: ElevenwardColors.amber,
                     ),
@@ -653,7 +702,7 @@ final class _SponsorScreen extends StatelessWidget {
                     isThreeLine: true,
                     trailing: Text(
                       '+£${contract.weeklyPayout}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: ElevenwardColors.grass,
                         fontWeight: FontWeight.w900,
                       ),
@@ -761,7 +810,7 @@ final class _RelationshipsScreen extends StatelessWidget {
                       const SizedBox(height: 7),
                       Text(
                         value.$4,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: ElevenwardColors.muted,
                           fontSize: 11,
                         ),
@@ -831,7 +880,7 @@ final class _LifestyleHubScreen extends StatelessWidget {
             color: ElevenwardColors.panel,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(17),
-              side: const BorderSide(color: ElevenwardColors.line),
+              side: BorderSide(color: ElevenwardColors.line),
             ),
             child: ListTile(
               minVerticalPadding: 12,
@@ -856,7 +905,7 @@ final class _LifestyleHubScreen extends StatelessWidget {
                 children: [
                   Text(
                     '$count',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: ElevenwardColors.grass,
                       fontWeight: FontWeight.w900,
                     ),
@@ -904,6 +953,7 @@ final class _LifestyleItemsScreen extends StatefulWidget {
 
 final class _LifestyleItemsScreenState extends State<_LifestyleItemsScreen> {
   static const _engine = CareerEngine();
+  bool _busy = false;
 
   @override
   Widget build(BuildContext context) {
@@ -925,6 +975,14 @@ final class _LifestyleItemsScreenState extends State<_LifestyleItemsScreen> {
           : ListView(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
               children: [
+                _DetailCard(
+                  child: Text(
+                    '${featureCopy(locale, 'availableFunds')}: £${career.player.money}',
+                    key: const Key('lifestyle-available-money'),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 if (!widget.collection) ...[
                   _WeeklyMarketBanner(
                     season: career.season,
@@ -950,8 +1008,10 @@ final class _LifestyleItemsScreenState extends State<_LifestyleItemsScreen> {
                       owned: owned,
                       equipped: equipped,
                       affordable: affordable,
-                      onBuy: owned || !affordable ? null : () => _buy(item),
-                      onEquip: widget.collection && owned && !equipped
+                      onBuy: owned || !affordable || _busy
+                          ? null
+                          : () => _buy(item),
+                      onEquip: widget.collection && owned && !equipped && !_busy
                           ? () => _equip(item)
                           : null,
                     ),
@@ -963,25 +1023,141 @@ final class _LifestyleItemsScreenState extends State<_LifestyleItemsScreen> {
   }
 
   Future<void> _buy(LifestyleItemDefinition item) async {
-    final current = widget.controller.activeCareer!;
-    final next = _engine.purchaseLifestyleItem(
-      snapshot: current,
-      item: item,
-      updatedAt: DateTime.now().toUtc(),
-    );
-    await widget.controller.saveCareer(next, eventType: 'lifestyle_purchase');
-    if (mounted) setState(() {});
+    if (_busy) return;
+    final locale = contentLocale(context);
+    setState(() => _busy = true);
+    try {
+      final current = widget.controller.activeCareer!;
+      final generation = widget.controller.activeCareerGeneration;
+      final next = _engine.purchaseLifestyleItem(
+        snapshot: current,
+        item: item,
+        updatedAt: DateTime.now().toUtc(),
+      );
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          key: const Key('lifestyle-purchase-review'),
+          scrollable: true,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          contentPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          title: Text(
+            context.l10n.buy,
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontSize: 18, fontWeight: FontWeight.w900),
+          ),
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '£${item.price}',
+                key: const Key('lifestyle-purchase-price'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '${featureCopy(locale, 'availableFunds')}: '
+                '£${current.player.money} → £${next.player.money}',
+                key: const Key('lifestyle-purchase-balance'),
+              ),
+              if (item.reputationEffect != 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '${uiCopy(locale, 'reputationLong')}: '
+                  '${current.player.reputation} → ${next.player.reputation}',
+                ),
+              ],
+              if (item.wellnessEffect != 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '${uiCopy(locale, 'wellness')}: '
+                  '${current.wellness} → ${next.wellness}',
+                ),
+              ],
+              const SizedBox(height: 16),
+              Text(
+                item.name.forLocale(locale),
+                key: const Key('lifestyle-purchase-item-name'),
+                style: Theme.of(context).textTheme.titleMedium
+                    ?.copyWith(fontSize: 18, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              Text(item.description.forLocale(locale)),
+              const SizedBox(height: 8),
+              Text(
+                '${uiCopy(locale, 'equipped')}: ${item.name.forLocale(locale)}',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              key: const Key('lifestyle-purchase-cancel'),
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(context.l10n.close),
+            ),
+            FilledButton(
+              key: const Key('lifestyle-purchase-confirm'),
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(context.l10n.buy),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+      final active = widget.controller.activeCareer;
+      if (active?.careerId != current.careerId ||
+          active?.revision != current.revision ||
+          generation != widget.controller.activeCareerGeneration) {
+        throw StateError('The reviewed career changed.');
+      }
+      await widget.controller.saveCareer(
+        next,
+        eventType: 'lifestyle_purchase',
+        expectedGeneration: generation,
+        expectedCareerId: current.careerId,
+        expectedRevision: current.revision,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(context.l10n.errorTryAgain)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _equip(LifestyleItemDefinition item) async {
-    final current = widget.controller.activeCareer!;
-    final next = _engine.equipLifestyleItem(
-      snapshot: current,
-      item: item,
-      updatedAt: DateTime.now().toUtc(),
-    );
-    await widget.controller.saveCareer(next, eventType: 'lifestyle_equipped');
-    if (mounted) setState(() {});
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final current = widget.controller.activeCareer!;
+      final generation = widget.controller.activeCareerGeneration;
+      final next = _engine.equipLifestyleItem(
+        snapshot: current,
+        item: item,
+        updatedAt: DateTime.now().toUtc(),
+      );
+      await widget.controller.saveCareer(
+        next,
+        eventType: 'lifestyle_equipped',
+        expectedGeneration: generation,
+        expectedCareerId: current.careerId,
+        expectedRevision: current.revision,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(context.l10n.errorTryAgain)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }
 
@@ -996,6 +1172,7 @@ final class _NationalTeamScreen extends StatefulWidget {
 
 final class _NationalTeamScreenState extends State<_NationalTeamScreen> {
   static const _engine = CareerEngine();
+  bool _busy = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1043,7 +1220,7 @@ final class _NationalTeamScreenState extends State<_NationalTeamScreen> {
                   '${career.nationalTeam.caps} ${uiCopy(locale, 'caps')} · '
                   '${career.nationalTeam.goals} ${uiCopy(locale, 'goals')} · '
                   '${career.nationalTeam.assists} ${uiCopy(locale, 'assists')}',
-                  style: const TextStyle(color: ElevenwardColors.muted),
+                  style: TextStyle(color: ElevenwardColors.muted),
                 ),
                 if (!eligible && !invitation) ...[
                   const SizedBox(height: 12),
@@ -1057,14 +1234,14 @@ final class _NationalTeamScreenState extends State<_NationalTeamScreen> {
                     children: [
                       Expanded(
                         child: OutlinedButton(
-                          onPressed: () => _decide(false),
+                          onPressed: _busy ? null : () => _decide(false),
                           child: Text(uiCopy(locale, 'decline')),
                         ),
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: () => _decide(true),
+                          onPressed: _busy ? null : () => _decide(true),
                           icon: const Icon(Icons.flag_rounded),
                           label: Text(uiCopy(locale, 'acceptCallUp')),
                         ),
@@ -1081,20 +1258,34 @@ final class _NationalTeamScreenState extends State<_NationalTeamScreen> {
   }
 
   Future<void> _decide(bool accept) async {
+    if (_busy) return;
     final current = widget.controller.activeCareer!;
-    final next = _engine.decideNationalTeamCallUp(
-      snapshot: current,
-      accept: accept,
-      updatedAt: DateTime.now().toUtc(),
-      definition: widget.controller.activeContent?.catalog.world,
-    );
-    await widget.controller.saveCareer(
-      next,
-      eventType: accept
-          ? 'national_callup_accepted'
-          : 'national_callup_declined',
-    );
-    if (mounted) setState(() {});
+    final generation = widget.controller.activeCareerGeneration;
+    setState(() => _busy = true);
+    try {
+      final next = _engine.decideNationalTeamCallUp(
+        snapshot: current,
+        accept: accept,
+        updatedAt: DateTime.now().toUtc(),
+        definition: widget.controller.activeContent?.catalog.world,
+      );
+      await widget.controller.saveCareer(
+        next,
+        eventType: accept
+            ? 'national_callup_accepted'
+            : 'national_callup_declined',
+        expectedGeneration: generation,
+        expectedCareerId: current.careerId,
+        expectedRevision: current.revision,
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(context.l10n.errorTryAgain)));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }
 
@@ -1137,22 +1328,23 @@ final class _WeeklyMarketBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: ElevenwardColors.line),
       ),
-      child: Row(
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        spacing: 12,
+        runSpacing: 6,
         children: [
-          Expanded(
-            child: Text(
-              '${uiCopy(locale, 'season')} $season · '
-              '${uiCopy(locale, 'week')} $week',
-              style: const TextStyle(
-                color: ElevenwardColors.muted,
-                fontSize: 11,
-                fontWeight: FontWeight.w900,
-              ),
+          Text(
+            '${uiCopy(locale, 'season')} $season · '
+            '${uiCopy(locale, 'week')} $week',
+            style: TextStyle(
+              color: ElevenwardColors.muted,
+              fontSize: 11,
+              fontWeight: FontWeight.w900,
             ),
           ),
           Text(
             '$count ${uiCopy(locale, 'newListings')}',
-            style: const TextStyle(
+            style: TextStyle(
               color: ElevenwardColors.grass,
               fontSize: 11,
               fontWeight: FontWeight.w900,
@@ -1194,90 +1386,107 @@ final class _LifeItem extends StatelessWidget {
         color: owned ? ElevenwardColors.grass : ElevenwardColors.line,
       ),
     ),
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          width: 48,
-          height: 48,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: _rarityColor(item.rarity).withValues(alpha: .14),
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Icon(
-            _categoryIcon(item.category),
-            color: _rarityColor(item.rarity),
-          ),
+        Row(
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: _rarityColor(item.rarity).withValues(alpha: .14),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Icon(
+                _categoryIcon(item.category),
+                color: _rarityColor(item.rarity),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.name.forLocale(locale),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    _rarityLabel(locale, item.rarity),
+                    style: TextStyle(
+                      color: _rarityColor(item.rarity),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                item.name.forLocale(locale),
-                style: const TextStyle(fontWeight: FontWeight.w900),
+        const SizedBox(height: 10),
+        Text(
+          item.description.forLocale(locale),
+          style: TextStyle(color: ElevenwardColors.muted, fontSize: 12),
+        ),
+        const SizedBox(height: 8),
+        Text(_effects(), style: const TextStyle(fontSize: 12)),
+        const SizedBox(height: 10),
+        Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            Text(
+              '£${item.price}',
+              style: TextStyle(
+                color: ElevenwardColors.amber,
+                fontWeight: FontWeight.w900,
               ),
-              const SizedBox(height: 3),
+            ),
+            if (equipped)
               Text(
-                item.description.forLocale(locale),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '${item.rarity.name.toUpperCase()} · ${_effects()}',
+                uiCopy(locale, 'equipped').toUpperCase(),
                 style: TextStyle(
-                  color: _rarityColor(item.rarity),
+                  color: ElevenwardColors.grass,
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
                 ),
+              )
+            else if (owned)
+              onEquip == null
+                  ? Text(
+                      uiCopy(locale, 'owned').toUpperCase(),
+                      style: TextStyle(
+                        color: ElevenwardColors.grass,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    )
+                  : TextButton(
+                      onPressed: onEquip,
+                      child: Text(uiCopy(locale, 'equip')),
+                    )
+            else
+              FilledButton.tonalIcon(
+                key: Key('lifestyle-buy-${item.id}'),
+                onPressed: onBuy,
+                icon: const Icon(Icons.add_shopping_cart_rounded),
+                label: Text(context.l10n.buy),
               ),
-              const SizedBox(height: 5),
-              Text(
-                '£${item.price}',
-                style: const TextStyle(
-                  color: ElevenwardColors.amber,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
+          ],
         ),
-        const SizedBox(width: 8),
-        if (equipped)
+        if (!owned && !affordable) ...[
+          const SizedBox(height: 6),
           Text(
-            uiCopy(locale, 'equipped').toUpperCase(),
-            style: const TextStyle(
-              color: ElevenwardColors.grass,
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-            ),
-          )
-        else if (owned)
-          onEquip == null
-              ? Text(
-                  uiCopy(locale, 'owned').toUpperCase(),
-                  style: const TextStyle(
-                    color: ElevenwardColors.grass,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w900,
-                  ),
-                )
-              : TextButton(
-                  onPressed: onEquip,
-                  child: Text(uiCopy(locale, 'equip')),
-                )
-        else
-          IconButton.filledTonal(
-            key: Key('lifestyle-buy-${item.id}'),
-            tooltip: affordable
-                ? context.l10n.buy
-                : context.l10n.notEnoughMoney,
-            onPressed: onBuy,
-            icon: const Icon(Icons.add_shopping_cart_rounded),
+            context.l10n.notEnoughMoney,
+            style: TextStyle(color: ElevenwardColors.muted, fontSize: 12),
           ),
+        ],
       ],
     ),
   );
@@ -1301,6 +1510,32 @@ final class _LifeItem extends StatelessWidget {
         ? uiCopy(locale, 'collectionOnly')
         : effects.join(' · ');
   }
+}
+
+String _rarityLabel(String locale, ItemRarity rarity) {
+  final index = switch (locale) {
+    'es' => 1,
+    'pt-BR' => 2,
+    'fr' => 3,
+    _ => 0,
+  };
+  return switch (rarity) {
+    ItemRarity.common => const ['Common', 'Común', 'Comum', 'Commun'][index],
+    ItemRarity.uncommon => const [
+      'Uncommon',
+      'Poco común',
+      'Incomum',
+      'Peu commun',
+    ][index],
+    ItemRarity.rare => const ['Rare', 'Raro', 'Raro', 'Rare'][index],
+    ItemRarity.epic => const ['Epic', 'Épico', 'Épico', 'Épique'][index],
+    ItemRarity.legendary => const [
+      'Legendary',
+      'Legendario',
+      'Lendário',
+      'Légendaire',
+    ][index],
+  };
 }
 
 String _nationalStatus(

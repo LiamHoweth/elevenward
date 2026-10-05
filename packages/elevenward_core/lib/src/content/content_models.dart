@@ -112,6 +112,13 @@ final class EventChoiceDefinition {
     required this.reputationDelta,
     required this.moneyDelta,
     required this.wellnessDelta,
+    this.weeklyWagePercent = 100,
+    this.appearanceBonusDelta = 0,
+    this.familyDelta = 0,
+    this.fitnessDelta = 0,
+    this.contractSeasonsDelta = 0,
+    this.promisedRole,
+    this.outcome,
   });
 
   final String id;
@@ -120,6 +127,13 @@ final class EventChoiceDefinition {
   final int reputationDelta;
   final int moneyDelta;
   final int wellnessDelta;
+  final int weeklyWagePercent,
+      appearanceBonusDelta,
+      familyDelta,
+      fitnessDelta,
+      contractSeasonsDelta;
+  final String? promisedRole;
+  final LocalizedText? outcome;
 
   Map<String, Object?> toJson() => {
         'id': id,
@@ -128,6 +142,15 @@ final class EventChoiceDefinition {
         'reputationDelta': reputationDelta,
         'moneyDelta': moneyDelta,
         'wellnessDelta': wellnessDelta,
+        if (weeklyWagePercent != 100) 'weeklyWagePercent': weeklyWagePercent,
+        if (appearanceBonusDelta != 0)
+          'appearanceBonusDelta': appearanceBonusDelta,
+        if (familyDelta != 0) 'familyDelta': familyDelta,
+        if (fitnessDelta != 0) 'fitnessDelta': fitnessDelta,
+        if (contractSeasonsDelta != 0)
+          'contractSeasonsDelta': contractSeasonsDelta,
+        if (promisedRole != null) 'promisedRole': promisedRole,
+        if (outcome != null) 'outcome': outcome!.toJson(),
       };
 }
 
@@ -339,6 +362,15 @@ final class ContentCatalog {
             reputationDelta: choice['reputationDelta'] as int,
             moneyDelta: choice['moneyDelta'] as int,
             wellnessDelta: choice['wellnessDelta'] as int,
+            weeklyWagePercent: choice['weeklyWagePercent'] as int? ?? 100,
+            appearanceBonusDelta: choice['appearanceBonusDelta'] as int? ?? 0,
+            familyDelta: choice['familyDelta'] as int? ?? 0,
+            fitnessDelta: choice['fitnessDelta'] as int? ?? 0,
+            contractSeasonsDelta: choice['contractSeasonsDelta'] as int? ?? 0,
+            promisedRole: choice['promisedRole'] as String?,
+            outcome: choice['outcome'] == null
+                ? null
+                : LocalizedText.fromJson(object(choice['outcome'], 'outcome')),
           );
         }).toList(growable: false),
         previousPerformances: item['previousPerformances'] == null

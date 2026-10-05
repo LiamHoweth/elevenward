@@ -19,7 +19,7 @@ void main() {
     () => PackageInfo.setMockInitialValues(
       appName: 'Elevenward',
       packageName: 'test',
-      version: '0.1.0',
+      version: '1.1.0',
       buildNumber: '1',
       buildSignature: '',
     ),
@@ -151,6 +151,49 @@ void main() {
     await store.setPreference('content.verified.versions', registry);
     expect(await service.loadVersion('2026.2.1'), isNull);
     expect((await service.loadVersion('2026.2.2'))?.version, '2026.2.2');
+  });
+
+  test('verified old-rule content stays available for exact career pins without becoming new-career content', () async {
+    final store = await CareerStore.open(
+      path: inMemoryDatabasePath,
+      factory: databaseFactoryFfi,
+    );
+    addTearDown(store.close);
+    final algorithm = Ed25519();
+    final key = await algorithm.newKeyPair();
+    final publicKey = await key.extractPublicKey();
+    final original = jsonDecode(
+      File('assets/content/launch-2026.3.0.json').readAsStringSync(),
+    ) as Map;
+    final body = jsonEncode({
+      ...original,
+      'metadata': {
+        ...original['metadata'] as Map,
+        'releaseVersion': '2026.3.1',
+      },
+    });
+    final signature = await algorithm.sign(utf8.encode(body), keyPair: key);
+    final entry = {
+      'body': body,
+      'manifest': {
+        'releaseVersion': '2026.3.1',
+        'signatureAlgorithm': 'Ed25519',
+        'signature': base64Url.encode(signature.bytes),
+        'checksum': 'sha256:${sha256.convert(utf8.encode(body))}',
+      },
+    };
+    await store.setPreference('content.verified.bundle', entry);
+    await store.setPreference('content.verified.versions', {'2026.3.1': entry});
+    final api = ElevenwardApi(accessToken: () async => null);
+    addTearDown(api.close);
+    final service = ContentService(
+      api: api,
+      store: store,
+      publicKeyBase64: base64.encode(publicKey.bytes),
+    );
+    addTearDown(service.close);
+    expect((await service.load()).version, '2026.4.0');
+    expect((await service.loadVersion('2026.3.1'))!.version, '2026.3.1');
   });
 
   test(

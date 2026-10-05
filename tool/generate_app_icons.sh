@@ -2,7 +2,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-source_icon="$repo_root/assets/branding/elevenward-app-icon-source.png"
+source_icon="$repo_root/assets/branding/graphite/elevenward-11-icon-master.png"
 
 if [[ ! -f "$source_icon" ]]; then
   echo "Missing $source_icon" >&2
@@ -37,9 +37,11 @@ for entry in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
   density="${entry%%:*}"
   size="${entry##*:}"
   resize "$size" "$repo_root/android/app/src/main/res/mipmap-$density/ic_launcher.png"
-  resize "$size" "$repo_root/android/app/src/main/res/mipmap-$density/ic_launcher_foreground.png"
 done
 
 resize 512 "$repo_root/assets/branding/google-play-icon-512.png"
 resize 1024 "$repo_root/assets/branding/app-store-icon-1024.png"
+resize 256 "$repo_root/assets/branding/graphite/elevenward-11-ui.png"
+cp "$repo_root/assets/branding/graphite/elevenward-11-ui.png" \
+  "$repo_root/ios/Runner/Assets.xcassets/Brand11.imageset/Brand11.png"
 echo "Generated Elevenward app and store icon variants."

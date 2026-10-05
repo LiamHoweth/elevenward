@@ -104,6 +104,8 @@ final class WorldMapData {
 
   static Future<WorldMapData>? _cached;
   static WorldMapData? _resolved;
+  static final _geometryCache =
+      Expando<Map<WorldDefinition, List<_MapLabelGeometry>>>();
 
   static Future<WorldMapData> load() => _cached ??= _load();
 
@@ -174,6 +176,76 @@ final class WorldMapData {
     return _combinedBounds(
       features.where((feature) => countryIdFor(feature, world) == countryId),
     );
+  }
+
+  /// A stable land anchor shared by country labels and nationality/club marks.
+  Offset? anchorForCountry(String countryId, {WorldDefinition? definition}) {
+    final world = definition ?? buildLaunchWorld();
+    for (final geometry in _geometryFor(world)) {
+      if (geometry.country.id == countryId) return geometry.anchor;
+    }
+    return null;
+  }
+
+  /// Keep date-line islands from stretching a country focus across the world.
+  /// All geometry remains painted and selectable; only the camera fit changes.
+  Rect focusBoundsForCountry(String countryId, {WorldDefinition? definition}) {
+    final world = definition ?? buildLaunchWorld();
+    final bounds = boundsForCountry(countryId, definition: world);
+    final anchor = anchorForCountry(countryId, definition: world);
+    if (bounds.width < .75 || anchor == null) return bounds;
+    final rings = features
+        .where((feature) => countryIdFor(feature, world) == countryId)
+        .expand((feature) => feature._rings)
+        .where((ring) => ring.length >= 3)
+        .map((ring) => WorldMapFeature._boundsFor([ring]))
+        .where((ringBounds) => (ringBounds.center.dx - anchor.dx).abs() < .5);
+    final iterator = rings.iterator;
+    if (!iterator.moveNext()) return bounds;
+    var focused = iterator.current;
+    while (iterator.moveNext()) {
+      focused = focused.expandToInclude(iterator.current);
+    }
+    return focused;
+  }
+
+  List<_MapLabelGeometry> _geometryFor(WorldDefinition definition) {
+    final cache = _geometryCache[this] ??= {};
+    return cache.putIfAbsent(definition, () {
+      final countryFeatures = <String, List<WorldMapFeature>>{};
+      for (final feature in features) {
+        final id = countryIdFor(feature, definition);
+        if (id != null) (countryFeatures[id] ??= []).add(feature);
+      }
+      final result = <_MapLabelGeometry>[];
+      for (final country in definition.countries) {
+        final matching = countryFeatures[country.id] ?? [];
+        WorldMapFeature? largestFeature;
+        List<Offset>? largestRing;
+        var largestArea = 0.0;
+        for (final feature in matching) {
+          for (final ring in feature._rings) {
+            final area = _ringArea(ring).abs();
+            if (area > largestArea) {
+              largestArea = area;
+              largestFeature = feature;
+              largestRing = ring;
+            }
+          }
+        }
+        if (largestFeature == null || largestRing == null) continue;
+        final bounds = WorldMapFeature._boundsFor([largestRing]);
+        result.add(
+          _MapLabelGeometry(
+            country: country,
+            anchor: _labelAnchor(largestFeature, largestRing, bounds),
+            bounds: bounds,
+            area: largestArea,
+          ),
+        );
+      }
+      return result;
+    });
   }
 
   WorldMapFeature? featureAt(Offset normalizedPosition) {
@@ -348,7 +420,7 @@ final class _AccurateFootballWorldMapState
         color: ElevenwardColors.deep,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(ElevenwardRadii.card),
-          side: const BorderSide(color: ElevenwardColors.line),
+          side: BorderSide(color: ElevenwardColors.line),
         ),
         clipBehavior: Clip.antiAlias,
         child: FutureBuilder<WorldMapData>(
@@ -359,7 +431,7 @@ final class _AccurateFootballWorldMapState
               return Center(
                 child: Semantics(
                   label: uiCopy(locale, 'worldMap'),
-                  child: const Icon(
+                  child: Icon(
                     Icons.public_rounded,
                     size: 34,
                     color: ElevenwardColors.grass,
@@ -386,11 +458,13 @@ final class _AccurateFootballWorldMapState
                     playableCountryIds: widget.playableCountryIds,
                     selectedCountryId: widget.selectedCountryId,
                     definition: widget.definition ?? buildLaunchWorld(),
+                    brightness: Theme.of(context).brightness,
                   ),
                 );
                 final map = Semantics(
                   container: true,
-                  button: true,
+                  image: widget.interactive,
+                  button: !widget.interactive && widget.onExplore != null,
                   label: roleSummary,
                   hint: uiCopy(locale, 'exploreLeagues'),
                   child: widget.interactive
@@ -402,6 +476,7 @@ final class _AccurateFootballWorldMapState
                           ),
                           child: InteractiveViewer(
                             transformationController: _transformation,
+                            onInteractionStart: (_) => _animation.stop(),
                             minScale: 1,
                             maxScale: 8,
                             boundaryMargin: EdgeInsets.zero,
@@ -419,19 +494,86 @@ final class _AccurateFootballWorldMapState
                   children: [
                     Positioned.fill(child: map),
                     if (widget.interactive)
+                      Positioned.fill(
+                        child: AnimatedBuilder(
+                          animation: _transformation,
+                          builder: (context, _) => _MapCountryLabels(
+                            data: snapshot.data!,
+                            definition: world,
+                            viewport: size,
+                            transformation: _transformation.value,
+                            locale: locale,
+                            homeCountryId: widget.homeCountryId,
+                            currentClubCountryId: widget.currentClubCountryId,
+                            selectedCountryId: widget.selectedCountryId,
+                          ),
+                        ),
+                      ),
+                    if (widget.interactive)
                       Positioned(
                         right: 8,
                         top: 8,
-                        child: IconButton.filledTonal(
-                          key: const Key('world-map-reset'),
-                          tooltip: uiCopy(locale, 'resetMap'),
-                          onPressed: _resetMap,
-                          icon: const Icon(Icons.center_focus_strong_rounded),
+                        child: AnimatedBuilder(
+                          animation: _transformation,
+                          builder: (context, _) {
+                            final scale = _transformation.value
+                                .getMaxScaleOnAxis();
+                            return Material(
+                              color: ElevenwardColors.ink.withValues(
+                                alpha: .94,
+                              ),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                side: BorderSide(color: ElevenwardColors.line),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    key: const Key('world-map-zoom-in'),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                    tooltip: _mapCopy(locale, 'zoomIn'),
+                                    onPressed: scale < 7.999
+                                        ? () => _zoomBy(1.5)
+                                        : null,
+                                    icon: const Icon(Icons.add_rounded),
+                                  ),
+                                  IconButton(
+                                    key: const Key('world-map-zoom-out'),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                    tooltip: _mapCopy(locale, 'zoomOut'),
+                                    onPressed: scale > 1.001
+                                        ? () => _zoomBy(1 / 1.5)
+                                        : null,
+                                    icon: const Icon(Icons.remove_rounded),
+                                  ),
+                                  IconButton(
+                                    key: const Key('world-map-reset'),
+                                    constraints: const BoxConstraints(
+                                      minWidth: 48,
+                                      minHeight: 48,
+                                    ),
+                                    tooltip: uiCopy(locale, 'resetMap'),
+                                    onPressed: _resetMap,
+                                    icon: const Icon(
+                                      Icons.center_focus_strong_rounded,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
                         ),
                       ),
                     Positioned(
                       left: 10,
-                      right: 58,
+                      right: 10,
                       bottom: 8,
                       child: _MapLegend(
                         locale: locale,
@@ -486,7 +628,7 @@ final class _AccurateFootballWorldMapState
     final data = _data;
     if (data == null || _viewportSize.isEmpty || !mounted) return;
     final bounds = widget.selectedCountryId != null
-        ? data.boundsForCountry(
+        ? data.focusBoundsForCountry(
             widget.selectedCountryId!,
             definition: widget.definition,
           )
@@ -519,6 +661,34 @@ final class _AccurateFootballWorldMapState
     widget.onReset();
   }
 
+  void _zoomBy(double factor) {
+    if (_viewportSize.isEmpty) return;
+    _animation.stop();
+    final scale = _transformation.value.getMaxScaleOnAxis();
+    final nextScale = (scale * factor).clamp(1.0, 8.0);
+    final center = _transformation.toScene(_viewportSize.center(Offset.zero));
+    // Keep the current map center under the viewport center. Clamping matches
+    // InteractiveViewer's zero boundary margin, including a full-world reset.
+    final x = (_viewportSize.width / 2 - center.dx * nextScale).clamp(
+      _viewportSize.width * (1 - nextScale),
+      0.0,
+    );
+    final y = (_viewportSize.height / 2 - center.dy * nextScale).clamp(
+      _viewportSize.height * (1 - nextScale),
+      0.0,
+    );
+    final target = Matrix4.identity()
+      ..translateByDouble(x, y, 0, 1)
+      ..scaleByDouble(nextScale, nextScale, 1, 1);
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _transformation.value = target;
+    } else {
+      _animationStart = Matrix4.copy(_transformation.value);
+      _animationEnd = target;
+      _animation.forward(from: 0);
+    }
+  }
+
   Matrix4 _matrixFor(Rect bounds) {
     if (bounds.width >= .99 && bounds.height >= .99) return Matrix4.identity();
     const padding = .08;
@@ -529,11 +699,13 @@ final class _AccurateFootballWorldMapState
     final clampedScale = scale.clamp(1.0, maximum);
     final center = bounds.center;
     final translateX =
-        _viewportSize.width / 2 -
-        center.dx * _viewportSize.width * clampedScale;
+        (_viewportSize.width / 2 -
+                center.dx * _viewportSize.width * clampedScale)
+            .clamp(_viewportSize.width * (1 - clampedScale), 0.0);
     final translateY =
-        _viewportSize.height / 2 -
-        center.dy * _viewportSize.height * clampedScale;
+        (_viewportSize.height / 2 -
+                center.dy * _viewportSize.height * clampedScale)
+            .clamp(_viewportSize.height * (1 - clampedScale), 0.0);
     return Matrix4.identity()
       ..translateByDouble(translateX, translateY, 0, 1)
       ..scaleByDouble(clampedScale, clampedScale, 1, 1);
@@ -548,6 +720,7 @@ final class _WorldMapPainter extends CustomPainter {
     required this.playableCountryIds,
     required this.selectedCountryId,
     required this.definition,
+    required this.brightness,
   });
 
   final WorldMapData data;
@@ -556,6 +729,7 @@ final class _WorldMapPainter extends CustomPainter {
   final Set<String>? playableCountryIds;
   final String? selectedCountryId;
   final WorldDefinition definition;
+  final Brightness brightness;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -660,15 +834,9 @@ final class _WorldMapPainter extends CustomPainter {
   }
 
   Offset? _countryCenter(String countryId, Size size) {
-    final matching = data.features.where(
-      (feature) => data.countryIdFor(feature, definition) == countryId,
-    );
-    if (matching.isEmpty) return null;
-    final bounds = data.boundsForCountry(countryId, definition: definition);
-    return Offset(
-      bounds.center.dx * size.width,
-      bounds.center.dy * size.height,
-    );
+    final anchor = data.anchorForCountry(countryId, definition: definition);
+    if (anchor == null) return null;
+    return Offset(anchor.dx * size.width, anchor.dy * size.height);
   }
 
   @override
@@ -678,7 +846,8 @@ final class _WorldMapPainter extends CustomPainter {
       oldDelegate.currentClubCountryId != currentClubCountryId ||
       !setEquals(oldDelegate.playableCountryIds, playableCountryIds) ||
       oldDelegate.selectedCountryId != selectedCountryId ||
-      oldDelegate.definition != definition;
+      oldDelegate.definition != definition ||
+      oldDelegate.brightness != brightness;
 }
 
 final class _MapLegend extends StatelessWidget {
@@ -688,41 +857,318 @@ final class _MapLegend extends StatelessWidget {
   final bool showSelected;
 
   @override
-  Widget build(BuildContext context) => IgnorePointer(
-    child: Wrap(
-      spacing: 8,
-      runSpacing: 4,
+  Widget build(BuildContext context) => SingleChildScrollView(
+    key: const Key('world-map-legend'),
+    scrollDirection: Axis.horizontal,
+    child: Row(
       children: [
         _LegendItem(
           icon: Icons.flag_rounded,
           color: ElevenwardColors.grass,
           label: uiCopy(locale, 'mapNationality'),
         ),
+        const SizedBox(width: 8),
         _LegendItem(
           icon: Icons.shield_rounded,
           color: ElevenwardColors.coral,
           label: uiCopy(locale, 'mapCurrentClub'),
         ),
+        const SizedBox(width: 8),
         _LegendItem(
           icon: Icons.public_rounded,
           color: ElevenwardColors.sky,
           label: uiCopy(locale, 'mapPlayable'),
         ),
+        const SizedBox(width: 8),
         _LegendItem(
           icon: Icons.circle_outlined,
           color: ElevenwardColors.panel,
           label: uiCopy(locale, 'mapUnavailable'),
         ),
-        if (showSelected)
+        if (showSelected) ...[
+          const SizedBox(width: 8),
           _LegendItem(
             icon: Icons.radio_button_checked_rounded,
             color: ElevenwardColors.amber,
             label: uiCopy(locale, 'mapSelected'),
           ),
+        ],
       ],
     ),
   );
 }
+
+/// Labels are laid out in viewport coordinates, so pinch zoom enlarges the
+/// geography without magnifying or clipping country names. Only the pinned
+/// world's localized countries are named; geometry never unlocks new content.
+final class _MapCountryLabels extends StatefulWidget {
+  const _MapCountryLabels({
+    required this.data,
+    required this.definition,
+    required this.viewport,
+    required this.transformation,
+    required this.locale,
+    required this.homeCountryId,
+    required this.currentClubCountryId,
+    required this.selectedCountryId,
+  });
+
+  final WorldMapData data;
+  final WorldDefinition definition;
+  final Size viewport;
+  final Matrix4 transformation;
+  final String locale;
+  final String homeCountryId;
+  final String? currentClubCountryId;
+  final String? selectedCountryId;
+
+  @override
+  State<_MapCountryLabels> createState() => _MapCountryLabelsState();
+}
+
+final class _MapCountryLabelsState extends State<_MapCountryLabels> {
+  late List<_MapLabelGeometry> _geometry;
+
+  @override
+  void initState() {
+    super.initState();
+    _geometry = _resolveGeometry();
+  }
+
+  @override
+  void didUpdateWidget(covariant _MapCountryLabels oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.data != widget.data ||
+        oldWidget.definition != widget.definition) {
+      _geometry = _resolveGeometry();
+    }
+  }
+
+  List<_MapLabelGeometry> _resolveGeometry() =>
+      widget.data._geometryFor(widget.definition);
+
+  @override
+  Widget build(BuildContext context) {
+    final scale = widget.transformation.getMaxScaleOnAxis();
+    if (scale < 1.75) return const SizedBox.shrink();
+    final textScaler = MediaQuery.textScalerOf(context);
+    final viewport = widget.viewport;
+    final style = TextStyle(
+      fontFamily: Theme.of(context).textTheme.bodySmall?.fontFamily,
+      color: ElevenwardColors.cream,
+      fontSize: 11,
+      height: 1.15,
+      letterSpacing: 0,
+      fontWeight: FontWeight.w700,
+    );
+    final candidates = <_MapLabelCandidate>[];
+    for (final geometry in _geometry) {
+      final country = geometry.country;
+      final bounds = geometry.bounds;
+      final priority = country.id == widget.selectedCountryId
+          ? 0
+          : country.id == widget.homeCountryId
+          ? 1
+          : country.id == widget.currentClubCountryId
+          ? 2
+          : 3;
+      // Small neighbours appear when there is enough geographic space. A
+      // directly selected country can always compete for a label position.
+      if (priority == 3 &&
+          (bounds.width * viewport.width * scale < 18 ||
+              bounds.height * viewport.height * scale < 14)) {
+        continue;
+      }
+      final anchor = geometry.anchor;
+      final screenAnchor = MatrixUtils.transformPoint(
+        widget.transformation,
+        Offset(anchor.dx * viewport.width, anchor.dy * viewport.height),
+      );
+      if (!(Offset.zero & viewport).contains(screenAnchor)) continue;
+      candidates.add(
+        _MapLabelCandidate(
+          countryId: country.id,
+          name: country.nameFor(widget.locale),
+          anchor: screenAnchor,
+          area: geometry.area,
+          priority: priority,
+        ),
+      );
+    }
+    candidates.sort((a, b) {
+      final byPriority = a.priority.compareTo(b.priority);
+      return byPriority == 0 ? b.area.compareTo(a.area) : byPriority;
+    });
+    final legendHeight = textScaler.scale(9) * 1.5 + 24;
+    final allowed = Rect.fromLTRB(
+      5,
+      5,
+      viewport.width - 5,
+      viewport.height - legendHeight,
+    );
+    final occupied = <Rect>[Rect.fromLTWH(viewport.width - 160, 0, 160, 64)];
+    final labels = <Widget>[];
+    for (final candidate in candidates) {
+      final painter = TextPainter(
+        text: TextSpan(text: candidate.name, style: style),
+        textDirection: Directionality.of(context),
+        textScaler: textScaler,
+        maxLines: 1,
+        ellipsis: '…',
+      )..layout(maxWidth: viewport.width - 22);
+      final labelSize = Size(
+        painter.width.ceilToDouble() + 14,
+        painter.height.ceilToDouble() + 8,
+      );
+      painter.dispose();
+      final anchor = candidate.anchor;
+      final origins = [
+        Offset(
+          anchor.dx - labelSize.width / 2,
+          anchor.dy - labelSize.height - 16,
+        ),
+        Offset(anchor.dx - labelSize.width / 2, anchor.dy + 16),
+        Offset(anchor.dx + 16, anchor.dy - labelSize.height / 2),
+        Offset(
+          anchor.dx - labelSize.width - 16,
+          anchor.dy - labelSize.height / 2,
+        ),
+      ];
+      Rect? placement;
+      for (final origin in origins) {
+        final rect = origin & labelSize;
+        if (!allowed.contains(rect.topLeft) ||
+            !allowed.contains(rect.bottomRight) ||
+            occupied.any((other) => other.overlaps(rect.inflate(4)))) {
+          continue;
+        }
+        placement = rect;
+        break;
+      }
+      if (placement == null) continue;
+      occupied.add(placement);
+      labels.add(
+        Positioned.fromRect(
+          rect: placement,
+          child: Container(
+            key: Key('world-map-label-${candidate.countryId}'),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+            decoration: BoxDecoration(
+              color: ElevenwardColors.ink.withValues(alpha: .94),
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: ElevenwardColors.line, width: .5),
+            ),
+            child: Text(
+              candidate.name,
+              style: style,
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      );
+    }
+    return IgnorePointer(
+      child: ExcludeSemantics(
+        child: ClipRect(child: Stack(children: labels)),
+      ),
+    );
+  }
+}
+
+final class _MapLabelGeometry {
+  const _MapLabelGeometry({
+    required this.country,
+    required this.anchor,
+    required this.bounds,
+    required this.area,
+  });
+
+  final CountryDefinition country;
+  final Offset anchor;
+  final Rect bounds;
+  final double area;
+}
+
+final class _MapLabelCandidate {
+  const _MapLabelCandidate({
+    required this.countryId,
+    required this.name,
+    required this.anchor,
+    required this.area,
+    required this.priority,
+  });
+
+  final String countryId;
+  final String name;
+  final Offset anchor;
+  final double area;
+  final int priority;
+}
+
+double _ringArea(List<Offset> ring) {
+  var area = 0.0;
+  for (var index = 0; index < ring.length; index++) {
+    final a = ring[index];
+    final b = ring[(index + 1) % ring.length];
+    area += a.dx * b.dy - b.dx * a.dy;
+  }
+  return area / 2;
+}
+
+Offset _labelAnchor(WorldMapFeature feature, List<Offset> ring, Rect bounds) {
+  var x = 0.0;
+  var y = 0.0;
+  final area = _ringArea(ring);
+  for (var index = 0; index < ring.length; index++) {
+    final a = ring[index];
+    final b = ring[(index + 1) % ring.length];
+    final cross = a.dx * b.dy - b.dx * a.dy;
+    x += (a.dx + b.dx) * cross;
+    y += (a.dy + b.dy) * cross;
+  }
+  final centroid = area.abs() < .0000001
+      ? bounds.center
+      : Offset(x / (6 * area), y / (6 * area));
+  if (feature.contains(centroid)) return centroid;
+  if (feature.contains(bounds.center)) return bounds.center;
+  // Concave outlines and archipelagos can place their mathematical centroid in
+  // water. Prefer an interior point near the largest landmass's center.
+  Offset? interior;
+  var closest = double.infinity;
+  for (var row = 1; row < 8; row++) {
+    for (var column = 1; column < 8; column++) {
+      final point = Offset(
+        bounds.left + bounds.width * column / 8,
+        bounds.top + bounds.height * row / 8,
+      );
+      final distance = (point - bounds.center).distanceSquared;
+      if (distance < closest && feature.contains(point)) {
+        interior = point;
+        closest = distance;
+      }
+    }
+  }
+  return interior ?? ring.first;
+}
+
+String _mapCopy(String locale, String key) =>
+    (const <String, Map<String, String>>{
+      'zoomIn': {
+        'en': 'Zoom in',
+        'es': 'Acercar',
+        'pt-BR': 'Aproximar',
+        'fr': 'Agrandir',
+      },
+      'zoomOut': {
+        'en': 'Zoom out',
+        'es': 'Alejar',
+        'pt-BR': 'Afastar',
+        'fr': 'Réduire',
+      },
+    })[key]?[locale] ??
+    key;
 
 final class _LegendItem extends StatelessWidget {
   const _LegendItem({
@@ -750,7 +1196,7 @@ final class _LegendItem extends StatelessWidget {
         const SizedBox(width: 4),
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             color: ElevenwardColors.cream,
             fontSize: 9,
             fontWeight: FontWeight.w800,

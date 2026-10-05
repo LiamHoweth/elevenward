@@ -4,6 +4,7 @@ import '../model/career_types.dart';
 import '../model/weekly_models.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'tactical_fit.dart';
 
 final class WorldSimulator {
   const WorldSimulator();
@@ -100,8 +101,11 @@ final class WorldSimulator {
         clubId: opponentId,
         clubName: opponentName,
         quality: quality,
-        tacticalFit: (55 + ((snapshot.seed ^ _stableHash(opponentId)) % 26))
-            .clamp(1, 100),
+        tacticalFit: snapshot.usesModernCareerRules
+            ? calculateTacticalFit(snapshot,
+                world.clubs.firstWhere((club) => club.id == snapshot.clubId))
+            : (55 + ((snapshot.seed ^ _stableHash(opponentId)) % 26))
+                .clamp(1, 100),
         isHome: fixture.homeId == playerId,
         competitionId: competition.id,
         competitionKind: competition.kind,
@@ -132,7 +136,9 @@ final class WorldSimulator {
       clubId: opponent.id,
       clubName: opponent.name,
       quality: opponent.quality,
-      tacticalFit: (58 + archetypeFit).clamp(1, 100),
+      tacticalFit: snapshot.usesModernCareerRules
+          ? calculateTacticalFit(snapshot, club)
+          : (58 + archetypeFit).clamp(1, 100),
       isHome: fixture.homeId == snapshot.clubId,
       competitionId: leagueId,
     );

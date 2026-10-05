@@ -4,7 +4,13 @@
 
 ## Current rules
 
-- `2026.4` is assigned to every newly created career. It adds the expanded
+- `2026.5` is assigned to newly created careers. It corrects personal goals/assists
+  against team scores and omitted-match ratings, adds role-specific contributions
+  to legacy scoring, age-sensitive training and shared tactical fit. Snapshot
+  schema 14 stores bounded journals, goals, story flags, durable pending event IDs
+  and loan ownership. Latest authored family spending applies only to these new
+  rules; previous careers retain their formulas and pinned catalog.
+- `2026.4` retains the expanded
   26-system world, regional national-team qualification, dedicated postseason
   international match advancement, and the 32-team World Nations Championship.
   Snapshot schema 13 adds an explicit player transfer request (target league,
@@ -18,12 +24,16 @@
   fractional progress and boost-use list begin empty.
 - Relationship reach, manager-selection influence, teammate match influence,
   family recovery, community reputation support, and ongoing equipped-lifestyle
-  effects are enabled for `2026.2`, `2026.3`, and `2026.4` careers.
+  effects are enabled for `2026.2`, `2026.3`, `2026.4`, and `2026.5` careers.
 - Existing `2026.1` careers keep the earlier selection, transfer, recovery, reputation, and team-result formulas when loaded by the new client.
 - Authored content is pinned for the whole career. Signed releases are retained
   by version, and a save cannot open against a different event/situation/item
   catalog. A newly downloaded release becomes the default only for new careers
   and for the career-slot surface until a pinned career is opened.
+- New bundled content `2026.4.0` requires client `1.1.0` and rules `2026.5`;
+  it retains the expanded world and adds four localized mentor events. Previously
+  verified older-rule content stays available for exact saved-career pins; it
+  cannot become the default for new careers.
 - Content `2026.3.0` contains the expanded 520-club world. Bundled content
   `2026.2.0` and its `2026.1.0` compatibility alias retain the original
   120-club world and do not receive new leagues mid-career.

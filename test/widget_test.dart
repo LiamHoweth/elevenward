@@ -129,10 +129,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('world-region-europe')),
       180,
-      scrollable: find.descendant(
-        of: find.byKey(const Key('world-map-view')),
-        matching: find.byType(Scrollable),
-      ),
+      scrollable: _verticalWorldScroll(find.byKey(const Key('world-map-view'))),
     );
     await tester.tap(find.byKey(const Key('world-region-europe')));
     await tester.pumpAndSettle();
@@ -146,7 +143,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('England Unity Cup'),
       300,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: _verticalWorldScroll(find.byType(CustomScrollView).last),
     );
     await tester.drag(find.byType(CustomScrollView), const Offset(0, -120));
     await tester.pumpAndSettle();
@@ -182,10 +179,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.byKey(const Key('world-region-europe')),
       180,
-      scrollable: find.descendant(
-        of: find.byKey(const Key('world-map-view')),
-        matching: find.byType(Scrollable),
-      ),
+      scrollable: _verticalWorldScroll(find.byKey(const Key('world-map-view'))),
     );
     await tester.tap(find.byKey(const Key('world-region-europe')));
     await tester.pumpAndSettle();
@@ -197,7 +191,7 @@ void main() {
     await tester.scrollUntilVisible(
       find.text('RECENT RESULTS'),
       300,
-      scrollable: find.byType(Scrollable).first,
+      scrollable: _verticalWorldScroll(find.byType(CustomScrollView).last),
     );
     await tester.drag(
       find.byType(CustomScrollView).last,
@@ -229,7 +223,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('Canada · CONCACAF'), findsOneWidget);
-    expect(find.textContaining('Next qualifying cycle'), findsOneWidget);
+    expect(find.textContaining('next qualifying cycle'), findsOneWidget);
     expect(find.byKey(const Key('country-league-canada-first')), findsNothing);
   });
 
@@ -244,10 +238,7 @@ void main() {
 
     expect(find.byType(InteractiveViewer), findsNothing);
     final rootScroll = tester.state<ScrollableState>(
-      find.descendant(
-        of: find.byKey(const Key('world-map-view')),
-        matching: find.byType(Scrollable),
-      ),
+      _verticalWorldScroll(find.byKey(const Key('world-map-view'))),
     );
     expect(rootScroll.position.pixels, 0);
     await tester.drag(
@@ -354,6 +345,10 @@ void main() {
     expect(find.text('ELEVENWARD'), findsNothing);
     expect(find.text('CHOOSE YOUR EDGE'), findsOneWidget);
     expect(find.text('Mika Vale'), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-selector-button')),
+    );
     expect(find.text('Finishing'), findsOneWidget);
     expect(find.byKey(const Key('focus-selector-button')), findsOneWidget);
     expect(find.byKey(const Key('focus-options')), findsNothing);
@@ -372,6 +367,10 @@ void main() {
       ),
     );
 
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-selector-button')),
+    );
     await tester.tap(find.byKey(const Key('focus-selector-button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('focus-options')), findsOneWidget);
@@ -379,10 +378,24 @@ void main() {
       expect(find.byKey(Key('focus-option-${attribute.name}')), findsOneWidget);
     }
 
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-option-pace')),
+    );
     await tester.tap(find.byKey(const Key('focus-option-pace')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('focus-options')), findsNothing);
-    expect(find.text('Pace'), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-selector-button')),
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('focus-selector-button')),
+        matching: find.text('Pace'),
+      ),
+      findsOneWidget,
+    );
     expect(persisted, PlayerAttribute.pace);
   });
 
@@ -426,6 +439,10 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('WHY IT HAPPENED'), findsNothing);
     expect(find.byKey(const ValueKey('match-recap')), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('recap-continue-button')),
+    );
     await tester.tap(find.byKey(const Key('recap-continue-button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('career-event-prompt')), findsOneWidget);
@@ -476,6 +493,10 @@ void main() {
       ),
     );
 
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('training-intensity-intensive')),
+    );
     await tester.tap(find.byKey(const Key('training-intensity-intensive')));
     await tester.pump();
     expect(
@@ -501,6 +522,10 @@ void main() {
       250,
       scrollable: find.byType(Scrollable).first,
     );
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('spotlight-option-safe')),
+    );
     await tester.tap(find.byKey(const Key('spotlight-option-safe')));
     await tester.pump();
     final commit = find.byKey(const Key('commit-button'));
@@ -512,9 +537,16 @@ void main() {
 
     expect(saved?.week, 2);
     expect(find.byKey(const ValueKey('match-recap')), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('recap-continue-button')),
+    );
     await tester.tap(find.byKey(const Key('recap-continue-button')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('focus-selector-button')), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('training-intensity-balanced')),
+    );
     expect(find.byKey(const Key('career-event-prompt')), findsNothing);
     expect(find.text('WHY IT HAPPENED'), findsNothing);
     expect(
@@ -526,6 +558,11 @@ void main() {
           .selected,
       isTrue,
     );
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-selector-button')),
+    );
+    expect(find.byKey(const Key('focus-selector-button')), findsOneWidget);
   });
 
   testWidgets('standalone career event applies and advances', (tester) async {
@@ -564,6 +601,10 @@ void main() {
       250,
       scrollable: find.byType(Scrollable).first,
     );
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('spotlight-option-safe')),
+    );
     await tester.tap(find.byKey(const Key('spotlight-option-safe')));
     await tester.pump();
     final commit = find.byKey(const Key('commit-button'));
@@ -573,14 +614,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('match-recap')), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('recap-continue-button')),
+    );
     await tester.tap(find.byKey(const Key('recap-continue-button')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('career-event-prompt')), findsOneWidget);
+    await _revealGameControl(
+      tester,
+      find.byKey(Key('career-event-choice-${event.choices.first.id}')),
+    );
     await tester.tap(
       find.byKey(Key('career-event-choice-${event.choices.first.id}')),
     );
     await tester.pumpAndSettle();
 
+    await _revealGameControl(
+      tester,
+      find.byKey(const Key('focus-selector-button')),
+    );
     expect(find.byKey(const Key('focus-selector-button')), findsOneWidget);
     expect(saved, hasLength(2));
     expect(saved.last.resolvedEventIds, hasLength(1));
@@ -604,6 +657,10 @@ void main() {
       );
       await tester.drag(find.byType(Scrollable).first, const Offset(0, -100));
       await tester.pumpAndSettle();
+      await _revealGameControl(
+        tester,
+        find.byKey(const Key('focus-selector-button')),
+      );
       await tester.tap(find.byKey(const Key('focus-selector-button')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('focus-options')), findsOneWidget);
@@ -624,14 +681,21 @@ Widget _localizedApp(Widget home) => MaterialApp(
   home: home,
 );
 
+// World includes horizontal map legends and single-line text-field scrolling.
+// Drive only the vertical content pane selected by the test.
+Finder _verticalWorldScroll(Finder pane) => find.descendant(
+  of: pane,
+  matching: find.byWidgetPredicate(
+    (widget) =>
+        widget is Scrollable && widget.axisDirection == AxisDirection.down,
+  ),
+);
+
 Future<void> _revealWorldMapControl(WidgetTester tester, Finder control) async {
   await tester.scrollUntilVisible(
     control,
     220,
-    scrollable: find.descendant(
-      of: find.byKey(const Key('world-map-view')),
-      matching: find.byType(Scrollable),
-    ),
+    scrollable: _verticalWorldScroll(find.byKey(const Key('world-map-view'))),
   );
   await tester.ensureVisible(control);
   await tester.pumpAndSettle();
@@ -667,4 +731,19 @@ Offset? _insideFeatureOrNull(WorldMapFeature feature) {
     }
   }
   return null;
+}
+
+Future<void> _revealGameControl(WidgetTester tester, Finder target) async {
+  if (target.evaluate().isEmpty) {
+    await tester.drag(find.byType(Scrollable).first, const Offset(0, 15000));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      target,
+      150,
+      scrollable: find.byType(Scrollable).first,
+      maxScrolls: 80,
+    );
+  }
+  await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
 }
