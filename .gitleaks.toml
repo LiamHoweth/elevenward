@@ -1,0 +1,21 @@
+title = "Elevenward secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Threat model prose contains no credential"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^docs/THREAT_MODEL\.md$''']
+regexes = ['''^\| Account/session tokens \| App process to Keychain/Android Keystore \| This-device secure-storage accessibility, scoped bearer tokens, expiry/revocation and clearing on sign-out/deletion \|$''']
+
+[[rules.allowlists]]
+description = "Public screenshot filename contains no credential"
+condition = "AND"
+regexTarget = "line"
+paths = ['''^integration_test/app_store_capture_test\.dart$''']
+regexes = ['''^\s*await _capture\(tester, localeKey, '04-weekly-focus'\);\s*$''']

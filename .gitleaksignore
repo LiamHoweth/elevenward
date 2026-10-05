@@ -1,5 +1,0 @@
-# Only these exact false-positive fingerprints are ignored; secret scanning stays enabled.
-# Documentation describing token storage, with no credential value.
-e9bc70a0e87e8c9fa8599c02285e9793a1f1d053:docs/THREAT_MODEL.md:generic-api-key:27
-# A public screenshot filename, not an API key.
-e9bc70a0e87e8c9fa8599c02285e9793a1f1d053:integration_test/app_store_capture_test.dart:generic-api-key:163
