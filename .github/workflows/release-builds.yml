@@ -73,6 +73,9 @@ jobs:
             printf 'storeFile=%s\n' "$key_path"
           } > android/key.properties
       - run: flutter pub get
+      - name: Resolve core test dependencies
+        working-directory: packages/elevenward_core
+        run: dart pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build signed Android App Bundle
@@ -149,6 +152,9 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/elevenward.mobileprovision"
       - run: flutter pub get
+      - name: Resolve core test dependencies
+        working-directory: packages/elevenward_core
+        run: dart pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build signed App Store IPA and symbols
