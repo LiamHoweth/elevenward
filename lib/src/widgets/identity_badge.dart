@@ -1,23 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../theme.dart';
+import '../player_portraits.dart';
 
 final class PlayerIdentityBadge extends StatelessWidget {
   const PlayerIdentityBadge({
     super.key,
     required this.playerName,
     required this.avatarId,
+    this.portraitId,
     this.size = 48,
   });
 
   final String playerName;
   final String avatarId;
+  final String? portraitId;
   final double size;
 
   @override
   Widget build(BuildContext context) {
     final accent = elevenwardCosmeticColor(avatarId);
     final showStyleMark = avatarId != 'initials';
+    final portraitAsset = playerPortraitAsset(portraitId);
     return Semantics(
       image: true,
       label: playerName,
@@ -34,16 +38,16 @@ final class PlayerIdentityBadge extends StatelessWidget {
                     shape: BoxShape.circle,
                     border: Border.all(color: accent, width: 2),
                   ),
-                  child: Center(
-                    child: Text(
-                      _initials(playerName),
-                      style: TextStyle(
-                        color: ElevenwardColors.cream,
-                        fontSize: size * .34,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -.3,
-                      ),
-                    ),
+                  child: ClipOval(
+                    child: portraitAsset == null
+                        ? Center(child: _initialsText())
+                        : Image.asset(
+                            portraitAsset,
+                            fit: BoxFit.cover,
+                            alignment: Alignment.topCenter,
+                            errorBuilder: (_, _, _) =>
+                                Center(child: _initialsText()),
+                          ),
                   ),
                 ),
               ),
@@ -76,6 +80,16 @@ final class PlayerIdentityBadge extends StatelessWidget {
     );
   }
 
+  Text _initialsText() => Text(
+    _initials(playerName),
+    style: TextStyle(
+      color: ElevenwardColors.cream,
+      fontSize: size * .34,
+      fontWeight: FontWeight.w900,
+      letterSpacing: -.3,
+    ),
+  );
+
   String _initials(String name) {
     final words = name
         .trim()
@@ -94,13 +108,13 @@ final class RoleIconBadge extends StatelessWidget {
     super.key,
     required this.icon,
     required this.label,
-    this.color = ElevenwardColors.sky,
+    this.color,
     this.size = 48,
   });
 
   final IconData icon;
   final String label;
-  final Color color;
+  final Color? color;
   final double size;
 
   @override
@@ -112,11 +126,17 @@ final class RoleIconBadge extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: color.withValues(alpha: .12),
+          color: (color ?? ElevenwardColors.sky).withValues(alpha: .12),
           borderRadius: BorderRadius.circular(size * .3),
-          border: Border.all(color: color.withValues(alpha: .55)),
+          border: Border.all(
+            color: (color ?? ElevenwardColors.sky).withValues(alpha: .55),
+          ),
         ),
-        child: Icon(icon, color: color, size: size * .5),
+        child: Icon(
+          icon,
+          color: color ?? ElevenwardColors.sky,
+          size: size * .5,
+        ),
       ),
     ),
   );

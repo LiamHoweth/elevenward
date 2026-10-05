@@ -20,6 +20,7 @@ final class PlayerState {
     required this.goals,
     required this.assists,
     required this.nationalTeamId,
+    this.portraitId,
   });
 
   factory PlayerState.developmentStriker() => PlayerState.newCareer(
@@ -33,6 +34,7 @@ final class PlayerState {
     required String name,
     required Archetype archetype,
     String nationalTeamId = 'united-states',
+    String? portraitId,
   }) =>
       PlayerState(
         id: id,
@@ -50,6 +52,7 @@ final class PlayerState {
         goals: 0,
         assists: 0,
         nationalTeamId: nationalTeamId,
+        portraitId: portraitId,
       );
 
   factory PlayerState.fromJson(Map<String, Object?> json) => PlayerState(
@@ -71,6 +74,7 @@ final class PlayerState {
         goals: jsonInt(json, 'goals'),
         assists: jsonInt(json, 'assists'),
         nationalTeamId: json['nationalTeamId'] as String? ?? 'united-states',
+        portraitId: json['portraitId'] as String?,
       );
 
   final String id;
@@ -88,6 +92,7 @@ final class PlayerState {
   final int goals;
   final int assists;
   final String nationalTeamId;
+  final String? portraitId;
 
   int get overall => calculateOverall(attributes, position);
 
@@ -119,6 +124,7 @@ final class PlayerState {
       goals: goals ?? this.goals,
       assists: assists ?? this.assists,
       nationalTeamId: nationalTeamId,
+      portraitId: portraitId,
     );
   }
 
@@ -138,5 +144,6 @@ final class PlayerState {
         'goals': goals,
         'assists': assists,
         'nationalTeamId': nationalTeamId,
+        if (portraitId != null) 'portraitId': portraitId,
       };
 }

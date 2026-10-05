@@ -1,6 +1,658 @@
 import 'package:elevenward_core/elevenward_core.dart';
 
 const uiCopyTranslations = <String, Map<String, String>>{
+  'discoverElevenward': {
+    'en': 'Discover Elevenward',
+    'es': 'Descubre Elevenward',
+    'pt-BR': 'Conheça Elevenward',
+    'fr': 'Découvrez Elevenward',
+  },
+  'shareCareerFailed': {
+    'en': 'Could not share the career card. Please try again.',
+    'es': 'No se pudo compartir la tarjeta de carrera. Inténtalo de nuevo.',
+    'pt-BR':
+        'Não foi possível compartilhar o cartão de carreira. Tente novamente.',
+    'fr': 'Impossible de partager la carte de carrière. Réessayez.',
+  },
+  'studioGames': {
+    'en': 'More from Howeth Studio',
+    'es': 'Más de Howeth Studio',
+    'pt-BR': 'Mais da Howeth Studio',
+    'fr': 'Plus de Howeth Studio',
+  },
+  'studioGamesBody': {
+    'en': 'Explore our other games and apps. Opens your browser.',
+    'es': 'Explora nuestros otros juegos y apps. Se abre en tu navegador.',
+    'pt-BR': 'Conheça nossos outros jogos e apps. Abre no navegador.',
+    'fr': 'Découvrez nos autres jeux et apps. Ouvre votre navigateur.',
+  },
+  'websiteOpenFailed': {
+    'en': 'Could not open the website. Please try again.',
+    'es': 'No se pudo abrir el sitio web. Inténtalo de nuevo.',
+    'pt-BR': 'Não foi possível abrir o site. Tente novamente.',
+    'fr': 'Impossible d’ouvrir le site. Réessayez.',
+  },
+  'internationalClub': {
+    'en': 'International club competition',
+    'es': 'Competición internacional de clubes',
+    'pt-BR': 'Competição internacional de clubes',
+    'fr': 'Compétition internationale de clubs',
+  },
+  'domesticCup': {
+    'en': 'Domestic cup',
+    'es': 'Copa nacional',
+    'pt-BR': 'Copa nacional',
+    'fr': 'Coupe nationale',
+  },
+  'retirementRequiredTitle': {
+    'en': 'Career complete',
+    'es': 'Carrera completada',
+    'pt-BR': 'Carreira concluída',
+    'fr': 'Carrière terminée',
+  },
+  'retirementRequiredBody': {
+    'en': 'You have reached the end of your playing career. Review your final season, then finish your career to open your legacy.',
+    'es': 'Has llegado al final de tu carrera como jugador. Revisa tu última temporada y completa tu carrera para ver tu legado.',
+    'pt-BR': 'Você chegou ao fim da sua carreira como jogador. Reveja sua última temporada e conclua a carreira para abrir seu legado.',
+    'fr': 'Vous êtes arrivé au terme de votre carrière de joueur. Consultez votre dernière saison, puis terminez votre carrière pour découvrir votre bilan.',
+  },
+  'retirementRequiredAction': {
+    'en': 'Finish career',
+    'es': 'Completar carrera',
+    'pt-BR': 'Concluir carreira',
+    'fr': 'Terminer la carrière',
+  },
+  'targetRemaining': {
+    'en': '{remaining} {metric} to go',
+    'es': 'Faltan {remaining}: {metric}',
+    'pt-BR': 'Faltam {remaining}: {metric}',
+    'fr': 'Encore {remaining} : {metric}',
+  },
+  'targetProgress': {
+    'en': 'Progress toward {goal} career {metric}',
+    'es': 'Progreso hacia {goal} en carrera: {metric}',
+    'pt-BR': 'Progresso até {goal} na carreira: {metric}',
+    'fr': 'Progression vers {goal} en carrière : {metric}',
+  },
+  'retryChoice': {
+    'en': 'Retry',
+    'es': 'Reintentar',
+    'pt-BR': 'Tentar novamente',
+    'fr': 'Réessayer',
+  },
+  'tournamentActualFormat': {
+    'en': '{teams} teams · {groups} groups · knockout rounds',
+    'es': '{teams} selecciones · {groups} grupos · eliminatorias',
+    'pt-BR': '{teams} seleções · {groups} grupos · mata-mata',
+    'fr': '{teams} équipes · {groups} groupes · phase à élimination directe',
+  },
+  'tournamentGroupsKnockout': {
+    'en': 'Group stage · knockout rounds',
+    'es': 'Fase de grupos · eliminatorias',
+    'pt-BR': 'Fase de grupos · mata-mata',
+    'fr': 'Phase de groupes · phase à élimination directe',
+  },
+  'progressSaveFailed': {
+    'en': 'Could not save this choice. Try again before continuing.',
+    'es': 'No se pudo guardar esta elección. Inténtalo de nuevo antes de continuar.',
+    'pt-BR': 'Não foi possível salvar esta escolha. Tente novamente antes de continuar.',
+    'fr': 'Impossible d’enregistrer ce choix. Réessayez avant de continuer.',
+  },
+  'shots': {
+    'en': 'Shots',
+    'es': 'Tiros',
+    'pt-BR': 'Finalizações',
+    'fr': 'Tirs',
+  },
+  "finishChampion": {
+    "en": "Champions",
+    "es": "Campeones",
+    "pt-BR": "Campeões",
+    "fr": "Champions",
+  },
+  "finishRunnerUp": {
+    "en": "Runners-up",
+    "es": "Subcampeones",
+    "pt-BR": "Vice-campeões",
+    "fr": "Finalistes",
+  },
+  "finishSemifinal": {
+    "en": "Semifinal",
+    "es": "Semifinal",
+    "pt-BR": "Semifinal",
+    "fr": "Demi-finale",
+  },
+  "finishQuarterfinal": {
+    "en": "Quarterfinal",
+    "es": "Cuartos de final",
+    "pt-BR": "Quartas de final",
+    "fr": "Quart de finale",
+  },
+  "finishRoundOf16": {
+    "en": "Round of 16",
+    "es": "Octavos de final",
+    "pt-BR": "Oitavas de final",
+    "fr": "Huitièmes de finale",
+  },
+  "finishMissedSquad": {
+    "en": "Qualified · squad threshold not met",
+    "es": "Clasificado · no alcanzaste el nivel de convocatoria",
+    "pt-BR": "Classificado · nível de convocação não alcançado",
+    "fr": "Qualifié · seuil de sélection non atteint",
+  },
+  "finishDeclinedCallup": {
+    "en": "Qualified · call-up declined",
+    "es": "Clasificado · convocatoria rechazada",
+    "pt-BR": "Classificado · convocação recusada",
+    "fr": "Qualifié · sélection refusée",
+  },
+  "finishDidNotQualify": {
+    "en": "Did not qualify",
+    "es": "No se clasificó",
+    "pt-BR": "Não se classificou",
+    "fr": "Non qualifié",
+  },
+  "continueCareer": {
+    "en": "Continue your career",
+    "es": "Continúa tu carrera",
+    "pt-BR": "Continue sua carreira",
+    "fr": "Reprendre votre carrière",
+  },
+  "viewLegacy": {
+    "en": "View career legacy",
+    "es": "Ver legado de carrera",
+    "pt-BR": "Ver legado da carreira",
+    "fr": "Voir le bilan de carrière",
+  },
+  "trainingOnly": {
+    "en": "Training only; match fatigue is applied afterward.",
+    "es": "Solo entrenamiento; el cansancio del partido se aplica después.",
+    "pt-BR": "Apenas treino; o desgaste da partida é aplicado depois.",
+    "fr":
+        "Entraînement uniquement ; la fatigue du match est appliquée ensuite.",
+  },
+  "trainingPreview": {
+    "en": "Training preview",
+    "es": "Vista previa del entrenamiento",
+    "pt-BR": "Prévia do treino",
+    "fr": "Aperçu de l’entraînement",
+  },
+  "attributeCap": {
+    "en": "Attribute at its maximum",
+    "es": "Atributo al máximo",
+    "pt-BR": "Atributo no máximo",
+    "fr": "Attribut au maximum",
+  },
+  "yourContribution": {
+    "en": "Your contribution",
+    "es": "Tu contribución",
+    "pt-BR": "Sua contribuição",
+    "fr": "Votre contribution",
+  },
+  "selectionScore": {
+    "en": "Selection score",
+    "es": "Puntuación de selección",
+    "pt-BR": "Pontuação de escalação",
+    "fr": "Score de sélection",
+  },
+  "selectionFactors": {
+    "en": "What shaped selection",
+    "es": "Qué influyó en la selección",
+    "pt-BR": "O que influenciou a escalação",
+    "fr": "Les facteurs de sélection",
+  },
+  "selectionThresholds": {
+    "en": "Starter: 60 · Bench: 48 · Below 48: omitted",
+    "es": "Titular: 60 · Suplente: 48 · Menos de 48: fuera",
+    "pt-BR": "Titular: 60 · Reserva: 48 · Abaixo de 48: fora",
+    "fr": "Titulaire : 60 · Remplaçant : 48 · Moins de 48 : non retenu",
+  },
+  "opponentRank": {
+    "en": "Opponent rank",
+    "es": "Posición del rival",
+    "pt-BR": "Posição do adversário",
+    "fr": "Classement adverse",
+  },
+  "promotionGap": {
+    "en": "Points to promotion places:",
+    "es": "Puntos hasta puestos de ascenso:",
+    "pt-BR": "Pontos até a zona de acesso:",
+    "fr": "Points jusqu’aux places de promotion :",
+  },
+  "promotionPlaces": {
+    "en": "In the promotion places",
+    "es": "En puestos de ascenso",
+    "pt-BR": "Na zona de acesso",
+    "fr": "Dans les places de promotion",
+  },
+  "stageLabel": {"en": "Stage", "es": "Fase", "pt-BR": "Fase", "fr": "Phase"},
+  "knockoutRound": {
+    "en": "Knockout round",
+    "es": "Ronda eliminatoria",
+    "pt-BR": "Rodada eliminatória",
+    "fr": "Tour à élimination directe",
+  },
+  "nationalQualifier": {
+    "en": "National qualifier",
+    "es": "Clasificación de selecciones",
+    "pt-BR": "Eliminatórias de seleções",
+    "fr": "Qualifications nationales",
+  },
+  "milestones": {
+    "en": "Career milestones",
+    "es": "Hitos de carrera",
+    "pt-BR": "Marcos da carreira",
+    "fr": "Étapes de carrière",
+  },
+  "firstMilestone": {
+    "en": "First {metric}",
+    "es": "Primer registro: {metric}",
+    "pt-BR": "Primeiro registro: {metric}",
+    "fr": "Première étape : {metric}",
+  },
+  "personalTarget": {
+    "en": "Your next target",
+    "es": "Tu próximo objetivo",
+    "pt-BR": "Seu próximo objetivo",
+    "fr": "Votre prochain objectif",
+  },
+  "targetBody": {
+    "en": "{current} / {goal} career {metric}",
+    "es": "{current} / {goal} de carrera: {metric}",
+    "pt-BR": "{current} / {goal} na carreira: {metric}",
+    "fr": "{current} / {goal} en carrière : {metric}",
+  },
+  "targetHint": {
+    "en": "An optional personal target. Play at your own pace.",
+    "es": "Un objetivo personal opcional. Juega a tu ritmo.",
+    "pt-BR": "Uma meta pessoal opcional. Jogue no seu ritmo.",
+    "fr": "Un objectif personnel facultatif. Jouez à votre rythme.",
+  },
+  "versusPreviousSeason": {
+    "en": "Compared with season",
+    "es": "Comparado con la temporada",
+    "pt-BR": "Comparado com a temporada",
+    "fr": "Par rapport à la saison",
+  },
+  "seasonProgress": {
+    "en": "Season progress",
+    "es": "Progreso de temporada",
+    "pt-BR": "Progresso da temporada",
+    "fr": "Progression de la saison",
+  },
+  "howToPlay": {
+    "en": "How to play",
+    "es": "Cómo jugar",
+    "pt-BR": "Como jogar",
+    "fr": "Comment jouer",
+  },
+  "gameplayPreferences": {
+    "en": "Gameplay",
+    "es": "Juego",
+    "pt-BR": "Jogo",
+    "fr": "Jeu",
+  },
+  "quickTransitions": {
+    "en": "Quick match transitions",
+    "es": "Transiciones rápidas",
+    "pt-BR": "Transições rápidas",
+    "fr": "Transitions rapides",
+  },
+  "quickTransitionsBody": {
+    "en":
+        "Skip the decorative matchup intro. Decisions and recaps stay visible.",
+    "es": "Omite la introducción del partido. Las decisiones y los resúmenes siguen visibles.",
+    "pt-BR":
+        "Pule a introdução da partida. Decisões e resumos continuam visíveis.",
+    "fr": "Passez l’introduction du match. Les décisions et récapitulatifs restent visibles.",
+  },
+  "showCoachingTips": {
+    "en": "Beginner guidance",
+    "es": "Consejos para principiantes",
+    "pt-BR": "Dicas para iniciantes",
+    "fr": "Conseils pour débuter",
+  },
+  "showCoachingTipsBody": {
+    "en": "Short tips during your first match. Dismiss them at any time.",
+    "es": "Consejos breves durante tu primer partido. Puedes cerrarlos cuando quieras.",
+    "pt-BR": "Dicas breves na primeira partida. Feche quando quiser.",
+    "fr": "De courts conseils lors du premier match. Fermez-les à tout moment.",
+  },
+  "showCareerTarget": {
+    "en": "Show personal target",
+    "es": "Mostrar objetivo personal",
+    "pt-BR": "Mostrar meta pessoal",
+    "fr": "Afficher l’objectif personnel",
+  },
+  "dismissTip": {
+    "en": "Dismiss tip",
+    "es": "Cerrar consejo",
+    "pt-BR": "Fechar dica",
+    "fr": "Fermer le conseil",
+  },
+  "focusTip": {
+    "en": "Choose an attribute to develop. Light training restores fitness; heavier loads develop attributes but cost fitness. You can change your focus anytime.",
+    "es": "Elige un atributo para desarrollar. El entrenamiento ligero recupera estado físico; las cargas mayores desarrollan atributos pero gastan energía. Puedes cambiar el enfoque cuando quieras.",
+    "pt-BR": "Escolha um atributo para desenvolver. Treino leve recupera condição física; cargas maiores desenvolvem atributos, mas gastam energia. Você pode mudar o foco quando quiser.",
+    "fr": "Choisissez un attribut à développer. L’entraînement léger restaure la condition physique ; les charges plus élevées développent les attributs mais coûtent de l’énergie. Vous pouvez changer d’objectif à tout moment.",
+  },
+  "recapTip": {
+    "en": "Your match is saved. Review your contribution and development, then continue to any off-pitch decision or the next matchweek.",
+    "es": "Tu partido está guardado. Revisa tu contribución y desarrollo; después continúa a las decisiones fuera del campo o a la próxima jornada.",
+    "pt-BR": "Sua partida foi salva. Confira sua contribuição e evolução, depois avance para decisões fora de campo ou para a próxima rodada.",
+    "fr": "Votre match est enregistré. Consultez votre contribution et votre progression, puis passez à une décision hors terrain ou à la prochaine journée.",
+  },
+  "spotlightHelp": {
+    "en": "Compare the safe, balanced, and bold approaches. The displayed odds describe the spotlight, not the chance of winning the match. Choose explicitly, then commit.",
+    "es": "Compara las opciones segura, equilibrada y arriesgada. Las probabilidades describen la jugada clave, no la posibilidad de ganar el partido. Elige una opción y confírmala.",
+    "pt-BR": "Compare as opções segura, equilibrada e ousada. As chances descrevem o lance de destaque, não a chance de vencer a partida. Escolha e confirme.",
+    "fr": "Comparez les approches prudente, équilibrée et audacieuse. Les probabilités concernent l’action décisive, pas la victoire du match. Choisissez puis confirmez.",
+  },
+  "worldHelp": {
+    "en": "World shows tables, fixtures, competitions, and recorded results. Life holds agents, sponsors, relationships, and national-team opportunities.",
+    "es": "Mundo muestra tablas, partidos, competiciones y resultados. Vida reúne agentes, patrocinadores, relaciones y oportunidades con la selección.",
+    "pt-BR": "Mundo mostra tabelas, partidas, competições e resultados. Vida reúne agentes, patrocinadores, relacionamentos e oportunidades na seleção.",
+    "fr": "Monde présente les classements, rencontres, compétitions et résultats. Vie regroupe agents, sponsors, relations et occasions en sélection.",
+  },
+  "worldNationsTitle": {
+    "en": "World Nations Championship",
+    "es": "Campeonato Mundial de Selecciones",
+    "pt-BR": "Campeonato Mundial de Seleções",
+    "fr": "Championnat mondial des nations",
+  },
+  "worldNationsInvitation": {
+    "en": "{country} has qualified, and you have been selected for the national squad.",
+    "es": "{country} se ha clasificado y has sido convocado a la selección.",
+    "pt-BR": "{country} se classificou e você foi convocado para a seleção.",
+    "fr": "{country} s’est qualifié et vous avez été sélectionné en équipe nationale.",
+  },
+  "yourOverall": {
+    "en": "Your overall",
+    "es": "Tu valoración general",
+    "pt-BR": "Seu nível geral",
+    "fr": "Votre niveau général",
+  },
+  "yourReputation": {
+    "en": "Your reputation",
+    "es": "Tu reputación",
+    "pt-BR": "Sua reputação",
+    "fr": "Votre réputation",
+  },
+  "tournamentFormat": {
+    "en": "Format",
+    "es": "Formato",
+    "pt-BR": "Formato",
+    "fr": "Format",
+  },
+  "tournamentFormat32": {
+    "en": "32 teams · 8 groups",
+    "es": "32 equipos · 8 grupos",
+    "pt-BR": "32 seleções · 8 grupos",
+    "fr": "32 équipes · 8 groupes",
+  },
+  "acceptTournamentCallup": {
+    "en": "Accept call-up",
+    "es": "Aceptar convocatoria",
+    "pt-BR": "Aceitar convocação",
+    "fr": "Accepter la sélection",
+  },
+  "declineTournamentCallup": {
+    "en": "Decline and simulate",
+    "es": "Rechazar y simular",
+    "pt-BR": "Recusar e simular",
+    "fr": "Refuser et simuler",
+  },
+  "tournamentWinner": {
+    "en": "{country} won the championship.",
+    "es": "{country} ganó el campeonato.",
+    "pt-BR": "{country} venceu o campeonato.",
+    "fr": "{country} a remporté le championnat.",
+  },
+  "possession": {
+    "en": "Possession",
+    "es": "Posesión",
+    "pt-BR": "Posse de bola",
+    "fr": "Possession",
+  },
+  "shotsOnTarget": {
+    "en": "On target",
+    "es": "A puerta",
+    "pt-BR": "No alvo",
+    "fr": "Cadrés",
+  },
+  "spotlightOutcomeSuccess": {
+    "en": "The spotlight succeeded.",
+    "es": "La jugada clave salió bien.",
+    "pt-BR": "O lance de destaque deu certo.",
+    "fr": "L’action décisive a réussi.",
+  },
+  "spotlightOutcomeFailure": {
+    "en": "The spotlight did not succeed.",
+    "es": "La jugada clave no salió bien.",
+    "pt-BR": "O lance de destaque não deu certo.",
+    "fr": "L’action décisive n’a pas réussi.",
+  },
+  "matchHeadline": {
+    "en": "{team}: {result} against {opponent}",
+    "es": "{team}: {result} ante {opponent}",
+    "pt-BR": "{team}: {result} contra {opponent}",
+    "fr": "{team} : {result} contre {opponent}",
+  },
+  "matchWin": {
+    "en": "win",
+    "es": "victoria",
+    "pt-BR": "vitória",
+    "fr": "victoire",
+  },
+  "matchDraw": {
+    "en": "draw",
+    "es": "empate",
+    "pt-BR": "empate",
+    "fr": "match nul",
+  },
+  "matchLoss": {
+    "en": "defeat",
+    "es": "derrota",
+    "pt-BR": "derrota",
+    "fr": "défaite",
+  },
+  "matchNumbers": {
+    "en": "{possession}% possession · {shots} shots · {target} on target · {xg}–{opponentXg} xG.",
+    "es": "{possession}% de posesión · {shots} tiros · {target} a puerta · {xg}–{opponentXg} xG.",
+    "pt-BR": "{possession}% de posse · {shots} finalizações · {target} no alvo · {xg}–{opponentXg} xG.",
+    "fr": "{possession}% de possession · {shots} tirs · {target} cadrés · {xg}–{opponentXg} xG.",
+  },
+  "matchPlayerLine": {
+    "en": "{player}: {goals} goals, {assists} assists, rating {rating}.",
+    "es":
+        "{player}: {goals} goles, {assists} asistencias, valoración {rating}.",
+    "pt-BR": "{player}: {goals} gols, {assists} assistências, nota {rating}.",
+    "fr": "{player} : {goals} buts, {assists} passes décisives, note {rating}.",
+  },
+  "matchOmittedLine": {
+    "en": "{player} did not feature. Training progress still counts.",
+    "es": "{player} no participó. El progreso del entrenamiento se mantiene.",
+    "pt-BR":
+        "{player} não entrou em campo. O progresso do treino continua válido.",
+    "fr": "{player} n’a pas joué. La progression à l’entraînement compte toujours.",
+  },
+  "matchLateDrama": {
+    "en": "Late drama shaped the final score.",
+    "es": "El desenlace tardío marcó el resultado.",
+    "pt-BR": "Um desfecho emocionante marcou o placar.",
+    "fr": "Le dénouement tardif a marqué le score final.",
+  },
+  "matchComeback": {
+    "en": "The team recovered from a losing position.",
+    "es": "El equipo remontó una situación adversa.",
+    "pt-BR": "A equipe reagiu após ficar em desvantagem.",
+    "fr": "L’équipe est revenue après avoir été menée.",
+  },
+  "newsPlayerTitle": {
+    "en": "Player focus: {player}",
+    "es": "Protagonista: {player}",
+    "pt-BR": "Destaque: {player}",
+    "fr": "Le joueur à la une : {player}",
+  },
+  "newsPlayerBody": {
+    "en": "Form: {form} · Manager trust: {trust}.",
+    "es": "Forma: {form} · Confianza del entrenador: {trust}.",
+    "pt-BR": "Fase: {form} · Confiança do treinador: {trust}.",
+    "fr": "Dynamique : {form} · Confiance de l’entraîneur : {trust}.",
+  },
+  "newsWorldTitle": {
+    "en": "{team}: league position #{rank}",
+    "es": "{team}: puesto #{rank} en la liga",
+    "pt-BR": "{team}: posição #{rank} na liga",
+    "fr": "{team} : place #{rank} en championnat",
+  },
+  "newsWorldBody": {
+    "en": "The league table reflects the completed matchweek.",
+    "es": "La tabla refleja la jornada completada.",
+    "pt-BR": "A tabela reflete a rodada concluída.",
+    "fr": "Le classement reflète la journée terminée.",
+  },
+  "newsAgentTitle": {
+    "en": "Back to independent representation",
+    "es": "Vuelves a representarte por tu cuenta",
+    "pt-BR": "De volta à representação independente",
+    "fr": "Retour à la représentation indépendante",
+  },
+  "newsAgentBody": {
+    "en": "The representation fee could not be covered, ending the agreement.",
+    "es": "No se pudo pagar la tarifa de representación y el acuerdo terminó.",
+    "pt-BR": "A taxa de representação não pôde ser paga e o acordo terminou.",
+    "fr": "Les frais de représentation n’ont pas pu être réglés, mettant fin à l’accord.",
+  },
+  'creatorPlayerPreview': {
+    'en': 'Your player',
+    'es': 'Tu jugador',
+    'pt-BR': 'Seu jogador',
+    'fr': 'Votre joueur',
+  },
+  'creatorPosition': {
+    'en': 'Position',
+    'es': 'Posición',
+    'pt-BR': 'Posição',
+    'fr': 'Poste',
+  },
+  'creatorArchetype': {
+    'en': 'Play style',
+    'es': 'Estilo de juego',
+    'pt-BR': 'Estilo de jogo',
+    'fr': 'Style de jeu',
+  },
+  'creatorChoosePositionFirst': {
+    'en': 'Choose a position to see its three play styles.',
+    'es': 'Elige una posición para ver sus tres estilos de juego.',
+    'pt-BR': 'Escolha uma posição para ver seus três estilos de jogo.',
+    'fr': 'Choisissez un poste pour voir ses trois styles de jeu.',
+  },
+  'creatorChooseRole': {
+    'en': 'Choose a position and play style',
+    'es': 'Elige una posición y un estilo de juego',
+    'pt-BR': 'Escolha uma posição e um estilo de jogo',
+    'fr': 'Choisissez un poste et un style de jeu',
+  },
+  'creatorChooseRoleRequired': {
+    'en': 'Choose a position and play style to continue.',
+    'es': 'Elige una posición y un estilo de juego para continuar.',
+    'pt-BR': 'Escolha uma posição e um estilo de jogo para continuar.',
+    'fr': 'Choisissez un poste et un style de jeu pour continuer.',
+  },
+  'creatorSelectedNationalTeam': {
+    'en': 'Country you will represent',
+    'es': 'País que representarás',
+    'pt-BR': 'País que você representará',
+    'fr': 'Pays que vous représenterez',
+  },
+  'creatorNationalStep': {
+    'en': '2 · National team',
+    'es': '2 · Selección nacional',
+    'pt-BR': '2 · Seleção nacional',
+    'fr': '2 · Équipe nationale',
+  },
+  'creatorClubStep': {
+    'en': '3 · Starting club',
+    'es': '3 · Club inicial',
+    'pt-BR': '3 · Clube inicial',
+    'fr': '3 · Club de départ',
+  },
+  'creatorSelectedClub': {
+    'en': 'Starting club',
+    'es': 'Club inicial',
+    'pt-BR': 'Clube inicial',
+    'fr': 'Club de départ',
+  },
+  'creatorSearchClubs': {
+    'en': 'Search clubs or leagues',
+    'es': 'Buscar clubes o ligas',
+    'pt-BR': 'Buscar clubes ou ligas',
+    'fr': 'Rechercher des clubs ou championnats',
+  },
+  'creatorBrowseLeagues': {
+    'en': 'Browse leagues',
+    'es': 'Explorar ligas',
+    'pt-BR': 'Explorar ligas',
+    'fr': 'Parcourir les championnats',
+  },
+  'creatorEdit': {
+    'en': 'Edit',
+    'es': 'Editar',
+    'pt-BR': 'Editar',
+    'fr': 'Modifier',
+  },
+  'creatorCancel': {
+    'en': 'Cancel',
+    'es': 'Cancelar',
+    'pt-BR': 'Cancelar',
+    'fr': 'Annuler',
+  },
+  'creatorReturnReview': {
+    'en': 'Return to review',
+    'es': 'Volver al resumen',
+    'pt-BR': 'Voltar ao resumo',
+    'fr': 'Retour au récapitulatif',
+  },
+  'creatorDifficultyStory': {
+    'en': 'More forgiving spotlight decisions. Starting attributes stay the same.',
+    'es':
+        'Decisiones clave más permisivas. Los atributos iniciales no cambian.',
+    'pt-BR':
+        'Decisões de destaque mais fáceis. Os atributos iniciais não mudam.',
+    'fr': 'Décisions décisives plus indulgentes. Les attributs de départ ne changent pas.',
+  },
+  'creatorDifficultyProfessional': {
+    'en': 'Standard spotlight challenge. Starting attributes stay the same.',
+    'es': 'Desafío estándar en las decisiones clave. Los atributos iniciales no cambian.',
+    'pt-BR': 'Desafio padrão nas decisões de destaque. Os atributos iniciais não mudam.',
+    'fr': 'Défi standard lors des actions décisives. Les attributs de départ ne changent pas.',
+  },
+  'creatorDifficultyWorldClass': {
+    'en': 'More demanding spotlight decisions. Starting attributes stay the same.',
+    'es': 'Decisiones clave más exigentes. Los atributos iniciales no cambian.',
+    'pt-BR':
+        'Decisões de destaque mais difíceis. Os atributos iniciais não mudam.',
+    'fr': 'Décisions décisives plus exigeantes. Les attributs de départ ne changent pas.',
+  },
+  'playerPortrait': {
+    'en': 'Player portrait',
+    'es': 'Retrato del jugador',
+    'pt-BR': 'Retrato do jogador',
+    'fr': 'Portrait du joueur',
+  },
+  'playerPortraitBody': {
+    'en': 'Choose how your player looks.',
+    'es': 'Elige el aspecto de tu jugador.',
+    'pt-BR': 'Escolha a aparência do seu jogador.',
+    'fr': 'Choisissez l’apparence de votre joueur.',
+  },
+  'choosePortrait': {
+    'en': 'Choose portrait',
+    'es': 'Elegir retrato',
+    'pt-BR': 'Escolher retrato',
+    'fr': 'Choisir un portrait',
+  },
   'nationalityCreatorBody': {
     'en': 'Choose the country you will represent. This will also be your green home country on the world map.',
     'es': 'Elige el país que representarás. También será tu país de origen verde en el mapa mundial.',
@@ -14,10 +666,10 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'fr': 'Populaires',
   },
   'clubCreatorBody': {
-    'en': 'Browse region → league system → division → club, or search every playable league.',
-    'es': 'Explora región → sistema de liga → división → club, o busca en todas las ligas jugables.',
-    'pt-BR': 'Navegue por região → sistema de liga → divisão → clube ou pesquise em todas as ligas jogáveis.',
-    'fr': 'Parcourez région → système de ligue → division → club, ou recherchez dans toutes les ligues jouables.',
+    'en': 'Search clubs and leagues, choose a popular league, or browse by region and division.',
+    'es': 'Busca clubes y ligas, elige una liga popular o explora por región y división.',
+    'pt-BR': 'Busque clubes e ligas, escolha uma liga popular ou explore por região e divisão.',
+    'fr': 'Recherchez des clubs et des championnats, choisissez un championnat populaire ou parcourez les régions et divisions.',
   },
   'topSixLeagues': {
     'en': 'Top six leagues',
@@ -633,7 +1285,7 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'en': 'Weekly sponsorships',
     'es': 'Patrocinios semanales',
     'pt-BR': 'Patrocínios semanais',
-    'fr': 'Sponsors hebdomadaires',
+    'fr': 'Sponsors par semaine',
   },
   'lifePulse': {
     'en': 'Life pulse',
@@ -736,10 +1388,10 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'fr': 'Touchez pour continuer',
   },
   'focusSaveFailed': {
-    'en': 'Your focus changed for this session but could not be saved.',
-    'es': 'Tu enfoque cambió para esta sesión, pero no se pudo guardar.',
-    'pt-BR': 'Seu foco mudou nesta sessão, mas não pôde ser salvo.',
-    'fr': 'Votre priorité a changé pour cette session, mais n’a pas pu être enregistrée.',
+    'en': 'Could not save this focus. Your previous focus is still selected.',
+    'es': 'No se pudo guardar este enfoque. El enfoque anterior sigue seleccionado.',
+    'pt-BR': 'Não foi possível salvar este foco. O foco anterior continua selecionado.',
+    'fr': 'Impossible d’enregistrer cette priorité. La priorité précédente reste sélectionnée.',
   },
   'focusClearFailed': {
     'en': 'The saved weekly focus could not be cleared.',
@@ -954,31 +1606,176 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'pt-BR': 'Classificações',
     'fr': 'Classements',
   },
+  'onlineLegacy': {
+    'en': 'Online legacy',
+    'es': 'Legado en línea',
+    'pt-BR': 'Legado online',
+    'fr': 'Héritage en ligne',
+  },
+  'leaderboardSignIn': {
+    'en': 'Sign in from Account to view and join online leaderboards. Guest careers remain local.',
+    'es': 'Inicia sesión en Cuenta para ver y participar en las clasificaciones. Las carreras de invitado siguen siendo locales.',
+    'pt-BR': 'Entre em Conta para ver e participar das classificações. Carreiras de convidado ficam no aparelho.',
+    'fr': 'Connectez-vous dans Compte pour voir et rejoindre les classements. Les carrières invitées restent locales.',
+  },
+  'accountOnlineBenefits': {
+    'en': 'Sign in to sync careers. They publish to online leaderboards after sync unless you turn sharing off. Your in-game player name stays private; a generated alias appears until you claim a public name.',
+    'es': 'Inicia sesión para sincronizar carreras. Se publican en las clasificaciones tras sincronizarse, salvo que desactives compartir. Tu nombre de jugador sigue privado; aparece un alias generado hasta que elijas un nombre público.',
+    'pt-BR': 'Entre para sincronizar carreiras. Elas aparecem nos rankings após a sincronização, a menos que você desative o compartilhamento. O nome do jogador fica privado; um apelido gerado aparece até você escolher um nome público.',
+    'fr': 'Connectez-vous pour synchroniser vos carrières. Elles sont publiées dans les classements après synchronisation, sauf si vous désactivez le partage. Le nom du joueur reste privé ; un alias généré apparaît jusqu’à votre choix d’un nom public.',
+  },
+  'leaderboardNoPrizes': {
+    'en': 'Public names are moderated. This board awards no prizes.',
+    'es': 'Los nombres públicos se moderan. Esta clasificación no otorga premios.',
+    'pt-BR': 'Os nomes públicos são moderados. Esta classificação não concede prêmios.',
+    'fr': 'Les noms publics sont modérés. Ce classement n’offre aucun prix.',
+  },
+  'publicLeaderboardName': {
+    'en': 'Public leaderboard name',
+    'es': 'Nombre público',
+    'pt-BR': 'Nome público',
+    'fr': 'Nom public',
+  },
+  'claimLeaderboardName': {
+    'en': 'Claim leaderboard name',
+    'es': 'Elegir nombre de clasificación',
+    'pt-BR': 'Escolher nome de classificação',
+    'fr': 'Choisir un nom de classement',
+  },
+  'changeLeaderboardName': {
+    'en': 'Change leaderboard name',
+    'es': 'Cambiar nombre de clasificación',
+    'pt-BR': 'Alterar nome de classificação',
+    'fr': 'Modifier le nom du classement',
+  },
+  'generatedAliasShown': {
+    'en': 'Generated aliases are shown',
+    'es': 'Se muestran alias generados',
+    'pt-BR': 'Apelidos gerados são exibidos',
+    'fr': 'Des alias générés sont affichés',
+  },
+  'usernameSuspended': {
+    'en': 'Suspended — generated aliases are shown',
+    'es': 'Suspendido; se muestran alias generados',
+    'pt-BR': 'Suspenso; apelidos gerados são exibidos',
+    'fr': 'Suspendu ; des alias générés sont affichés',
+  },
+  'usernameRules': {
+    'en': 'This name is public across your careers. It must be unique. You can change it once every 30 days after claiming it.',
+    'es': 'Este nombre es público en todas tus carreras y debe ser único. Podrás cambiarlo una vez cada 30 días.',
+    'pt-BR': 'Este nome é público em todas as suas carreiras e deve ser único. Você pode alterá-lo a cada 30 dias.',
+    'fr': 'Ce nom est public pour toutes vos carrières et doit être unique. Vous pouvez le modifier tous les 30 jours.',
+  },
+  'usernameInvalid': {
+    'en': 'Use 3–20 characters. Start with a letter; use letters, numbers, and single underscores.',
+    'es': 'Usa 3–20 caracteres. Empieza con una letra; usa letras, números y guiones bajos simples.',
+    'pt-BR': 'Use 3–20 caracteres. Comece com uma letra; use letras, números e sublinhados simples.',
+    'fr': 'Utilisez 3 à 20 caractères. Commencez par une lettre ; utilisez lettres, chiffres et traits de soulignement simples.',
+  },
+  'usernameSaveFailed': {
+    'en': 'Could not save that name. Check it and try again.',
+    'es': 'No se pudo guardar el nombre. Revísalo e inténtalo de nuevo.',
+    'pt-BR': 'Não foi possível salvar o nome. Verifique e tente novamente.',
+    'fr': 'Impossible d’enregistrer ce nom. Vérifiez-le et réessayez.',
+  },
+  'usernameTaken': {
+    'en': 'That name is already taken.',
+    'es': 'Ese nombre ya está en uso.',
+    'pt-BR': 'Esse nome já está em uso.',
+    'fr': 'Ce nom est déjà pris.',
+  },
+  'usernameCooldown': {
+    'en': 'You can change your name once every 30 days.',
+    'es': 'Puedes cambiar tu nombre una vez cada 30 días.',
+    'pt-BR': 'Você pode alterar o nome a cada 30 dias.',
+    'fr': 'Vous pouvez modifier votre nom tous les 30 jours.',
+  },
+  'usernameNotAllowed': {
+    'en': 'That name is not allowed. Choose another.',
+    'es': 'Ese nombre no está permitido. Elige otro.',
+    'pt-BR': 'Esse nome não é permitido. Escolha outro.',
+    'fr': 'Ce nom n’est pas autorisé. Choisissez-en un autre.',
+  },
+  'save': {
+    'en': 'Save',
+    'es': 'Guardar',
+    'pt-BR': 'Salvar',
+    'fr': 'Enregistrer',
+  },
+  'saving': {
+    'en': 'Saving…',
+    'es': 'Guardando…',
+    'pt-BR': 'Salvando…',
+    'fr': 'Enregistrement…',
+  },
+  'nextUsernameChange': {
+    'en': 'Next change:',
+    'es': 'Próximo cambio:',
+    'pt-BR': 'Próxima alteração:',
+    'fr': 'Prochaine modification :',
+  },
+  'reportAndHide': {
+    'en': 'Report and hide',
+    'es': 'Denunciar y ocultar',
+    'pt-BR': 'Denunciar e ocultar',
+    'fr': 'Signaler et masquer',
+  },
+  'reportAndHidePrompt': {
+    'en': 'Report and hide this profile?',
+    'es': '¿Denunciar y ocultar este perfil?',
+    'pt-BR': 'Denunciar e ocultar este perfil?',
+    'fr': 'Signaler et masquer ce profil ?',
+  },
+  'offensiveUsername': {
+    'en': 'Offensive username',
+    'es': 'Nombre ofensivo',
+    'pt-BR': 'Nome ofensivo',
+    'fr': 'Nom offensant',
+  },
+  'impersonation': {
+    'en': 'Impersonation',
+    'es': 'Suplantación',
+    'pt-BR': 'Falsidade ideológica',
+    'fr': 'Usurpation d’identité',
+  },
+  'harassment': {
+    'en': 'Harassment',
+    'es': 'Acoso',
+    'pt-BR': 'Assédio',
+    'fr': 'Harcèlement',
+  },
+  'otherReason': {'en': 'Other', 'es': 'Otro', 'pt-BR': 'Outro', 'fr': 'Autre'},
+  'profileHiddenReportSent': {
+    'en': 'Profile hidden and report sent for review.',
+    'es': 'Perfil oculto y denuncia enviada para revisión.',
+    'pt-BR': 'Perfil oculto e denúncia enviada para análise.',
+    'fr': 'Profil masqué et signalement envoyé pour examen.',
+  },
+  'profileHiddenReportFailed': {
+    'en':
+        'Profile hidden here. The report could not be sent; try again online.',
+    'es': 'Perfil oculto aquí. No se pudo enviar la denuncia; vuelve a intentarlo en línea.',
+    'pt-BR': 'Perfil oculto aqui. Não foi possível enviar a denúncia; tente novamente online.',
+    'fr': 'Profil masqué ici. Le signalement n’a pas pu être envoyé ; réessayez en ligne.',
+  },
+  'leaderboardYou': {'en': 'You', 'es': 'Tú', 'pt-BR': 'Você', 'fr': 'Vous'},
   'browseLeaderboards': {
     'en': 'Browse leaderboards',
     'es': 'Ver clasificaciones',
     'pt-BR': 'Ver classificações',
     'fr': 'Voir les classements',
   },
-  'leaderboardNoPrizes': {
-    'en': 'Generated aliases only. No prizes or public free text.',
-    'es': 'Solo alias generados. Sin premios ni texto público libre.',
-    'pt-BR': 'Apenas apelidos gerados. Sem prêmios ou texto público livre.',
-    'fr': 'Alias générés uniquement. Aucun prix ni texte public libre.',
-  },
   'shareRetiredCareer': {
-    'en': 'Share completed careers',
-    'es': 'Compartir carreras terminadas',
-    'pt-BR': 'Compartilhar carreiras concluídas',
-    'fr': 'Partager les carrières terminées',
+    'en': 'Share careers online',
+    'es': 'Compartir carreras en línea',
+    'pt-BR': 'Compartilhar carreiras online',
+    'fr': 'Partager les carrières en ligne',
   },
   'leaderboardPrivacy': {
-    'en': 'Opt in before a retired career is submitted under your generated alias.',
-    'es':
-        'Actívalo antes de enviar una carrera retirada con tu alias generado.',
-    'pt-BR':
-        'Ative antes de enviar uma carreira encerrada com seu apelido gerado.',
-    'fr': 'Activez cette option avant tout envoi sous votre alias généré.',
+    'en': 'Signed-in careers publish after cloud sync. Turn this off to remove your entries.',
+    'es': 'Las carreras con sesión iniciada se publican tras sincronizarse. Desactívalo para retirar tus entradas.',
+    'pt-BR': 'Carreiras com login são publicadas após sincronização. Desative para remover suas entradas.',
+    'fr': 'Les carrières connectées sont publiées après synchronisation. Désactivez pour retirer vos entrées.',
   },
   'submitCompletedCareer': {
     'en': 'Submit this completed career',
@@ -1241,10 +2038,10 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'fr': 'Changer de carrière',
   },
   'identityStyle': {
-    'en': '1 · Identity & archetype',
-    'es': '1 · Identidad y arquetipo',
-    'pt-BR': '1 · Identidade e arquétipo',
-    'fr': '1 · Identité et archétype',
+    'en': '1 · Identity & role',
+    'es': '1 · Identidad y rol',
+    'pt-BR': '1 · Identidade e função',
+    'fr': '1 · Identité et rôle',
   },
   'firstName': {
     'en': 'First name',
@@ -1277,10 +2074,10 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'fr': '2 · Nationalité et club',
   },
   'reviewCareer': {
-    'en': '3 · Difficulty & review',
-    'es': '3 · Dificultad y revisión',
-    'pt-BR': '3 · Dificuldade e revisão',
-    'fr': '3 · Difficulté et vérification',
+    'en': '4 · Difficulty & review',
+    'es': '4 · Dificultad y revisión',
+    'pt-BR': '4 · Dificuldade e revisão',
+    'fr': '4 · Difficulté et vérification',
   },
   'back': {'en': 'Back', 'es': 'Atrás', 'pt-BR': 'Voltar', 'fr': 'Retour'},
   'lifeOverview': {
@@ -1362,7 +2159,7 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'en': 'FITNESS',
     'es': 'FÍSICO',
     'pt-BR': 'FÍSICO',
-    'fr': 'FORME',
+    'fr': 'PHYSIQUE',
   },
   'attribute': {
     'en': 'ATTRIBUTE',
@@ -2463,6 +3260,36 @@ const uiCopyTranslations = <String, Map<String, String>>{
     'pt-BR': 'Campo',
     'fr': 'Terrain',
   },
+  'cosmeticGraphite': {
+    'en': 'Graphite',
+    'es': 'Grafito',
+    'pt-BR': 'Grafite',
+    'fr': 'Graphite',
+  },
+  'displayMode': {
+    'en': 'Display mode',
+    'es': 'Modo de pantalla',
+    'pt-BR': 'Modo de exibição',
+    'fr': 'Mode d’affichage',
+  },
+  'displayDark': {
+    'en': 'Dark',
+    'es': 'Oscuro',
+    'pt-BR': 'Escuro',
+    'fr': 'Sombre',
+  },
+  'displayLight': {
+    'en': 'Light',
+    'es': 'Claro',
+    'pt-BR': 'Claro',
+    'fr': 'Clair',
+  },
+  'displaySystem': {
+    'en': 'Follow System',
+    'es': 'Seguir el sistema',
+    'pt-BR': 'Seguir o sistema',
+    'fr': 'Suivre le système',
+  },
   'cosmeticOcean': {
     'en': 'Ocean',
     'es': 'Océano',
@@ -2707,6 +3534,85 @@ String localizedArchetype(String locale, Archetype archetype) {
   return values[archetype.name]?[locale] ??
       values[archetype.name]?['en'] ??
       archetype.name;
+}
+
+String localizedArchetypeDescription(String locale, Archetype archetype) {
+  const descriptions = <Archetype, Map<String, String>>{
+    Archetype.poacher: {
+      'en': 'A quick striker with a focus on finishing.',
+      'es': 'Un delantero rápido centrado en la definición.',
+      'pt-BR': 'Um atacante veloz focado na finalização.',
+      'fr': 'Un attaquant rapide axé sur la finition.',
+    },
+    Archetype.targetForward: {
+      'en': 'A strong forward who can hold up play.',
+      'es': 'Un delantero fuerte que sabe retener el balón.',
+      'pt-BR': 'Um atacante forte que segura a bola.',
+      'fr': 'Un attaquant puissant capable de conserver le ballon.',
+    },
+    Archetype.completeForward: {
+      'en': 'A versatile forward with technique and passing.',
+      'es': 'Un delantero versátil con técnica y pase.',
+      'pt-BR': 'Um atacante versátil com técnica e passe.',
+      'fr': 'Un attaquant polyvalent, technique et bon passeur.',
+    },
+    Archetype.touchlineWinger: {
+      'en': 'A fast wide player who creates from the flank.',
+      'es': 'Un jugador de banda veloz que crea desde el costado.',
+      'pt-BR': 'Um ponta veloz que cria jogadas pela lateral.',
+      'fr': 'Un ailier rapide qui crée sur le côté.',
+    },
+    Archetype.invertedWinger: {
+      'en': 'A wide attacker with technique and finishing.',
+      'es': 'Un atacante de banda con técnica y definición.',
+      'pt-BR': 'Um ponta com técnica e finalização.',
+      'fr': 'Un ailier offensif, technique et bon finisseur.',
+    },
+    Archetype.wideCreator: {
+      'en': 'A wide playmaker built around passing and composure.',
+      'es': 'Un creador de banda centrado en el pase y la calma.',
+      'pt-BR': 'Um criador pelas laterais focado em passe e calma.',
+      'fr': 'Un créateur excentré axé sur la passe et le sang-froid.',
+    },
+    Archetype.playmaker: {
+      'en': 'A midfielder built around passing and technique.',
+      'es': 'Un centrocampista centrado en el pase y la técnica.',
+      'pt-BR': 'Um meio-campista focado em passe e técnica.',
+      'fr': 'Un milieu axé sur la passe et la technique.',
+    },
+    Archetype.boxToBox: {
+      'en': 'An energetic midfielder with stamina and pace.',
+      'es': 'Un centrocampista enérgico con resistencia y velocidad.',
+      'pt-BR': 'Um meio-campista dinâmico com fôlego e velocidade.',
+      'fr': 'Un milieu énergique, endurant et rapide.',
+    },
+    Archetype.ballWinner: {
+      'en': 'A midfielder built for defending and physical play.',
+      'es': 'Un centrocampista de defensa y juego físico.',
+      'pt-BR': 'Um meio-campista focado em defesa e força física.',
+      'fr': 'Un milieu axé sur la défense et le duel physique.',
+    },
+    Archetype.stopper: {
+      'en': 'A defender built around defending and strength.',
+      'es': 'Un defensa centrado en la defensa y la fuerza.',
+      'pt-BR': 'Um defensor focado em defesa e força.',
+      'fr': 'Un défenseur axé sur la défense et la puissance.',
+    },
+    Archetype.ballPlayingCentreBack: {
+      'en': 'A defender with passing and composure on the ball.',
+      'es': 'Un defensa con buen pase y calma con el balón.',
+      'pt-BR': 'Um defensor com passe e calma com a bola.',
+      'fr': 'Un défenseur calme et à l’aise dans la passe.',
+    },
+    Archetype.attackingFullback: {
+      'en': 'A fast defender with stamina to play wide.',
+      'es': 'Un defensa veloz con resistencia para jugar por banda.',
+      'pt-BR': 'Um defensor veloz com fôlego para atuar pelas laterais.',
+      'fr': 'Un défenseur rapide et endurant sur le côté.',
+    },
+  };
+  final localized = descriptions[archetype]!;
+  return localized[locale] ?? localized['en']!;
 }
 
 String localizedAgentName(String locale, String id) {
@@ -3096,3 +4002,12 @@ String localizedFootballNation(String locale, FootballNation nation) =>
             ? 'United States'
             : 'Estados Unidos',
     };
+
+/// Substitute named values after selecting the player’s language.
+String formatUiCopy(String locale, String key, Map<String, Object> values) {
+  var text = uiCopy(locale, key);
+  for (final entry in values.entries) {
+    text = text.replaceAll("{${entry.key}}", entry.value.toString());
+  }
+  return text;
+}

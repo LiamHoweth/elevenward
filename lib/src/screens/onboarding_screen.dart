@@ -49,16 +49,23 @@ final class _OnboardingScreenState extends State<OnboardingScreen> {
         fit: StackFit.expand,
         children: [
           Image.asset(
-            'assets/visual/stadium-hero.png',
+            'assets/visual/stadium-graphite.png',
             fit: BoxFit.cover,
             excludeFromSemantics: true,
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
-                colors: [Color(0xB307110C), ElevenwardColors.ink],
+                colors: [
+                  ElevenwardColors.ink.withValues(
+                    alpha: Theme.of(context).brightness == Brightness.dark
+                        ? .65
+                        : .9,
+                  ),
+                  ElevenwardColors.ink,
+                ],
               ),
             ),
           ),
@@ -114,7 +121,7 @@ final class _OnboardingScreenState extends State<OnboardingScreen> {
                               Text(
                                 item.body,
                                 textAlign: TextAlign.center,
-                                style: const TextStyle(
+                                style: TextStyle(
                                   color: ElevenwardColors.muted,
                                   fontSize: 17,
                                   height: 1.5,

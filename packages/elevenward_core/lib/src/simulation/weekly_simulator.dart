@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../content/content_models.dart';
+import '../model/career_features.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
 import '../model/enums.dart';
@@ -10,9 +11,20 @@ import '../model/reward_modifiers.dart';
 import '../model/weekly_models.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'career_engine.dart';
 import 'match_report_generator.dart';
 import 'news_engine.dart';
 import 'world_simulator.dart';
+
+double ageDevelopmentMultiplier(int age) => age <= 20
+    ? .65
+    : age <= 24
+        ? .5
+        : age <= 28
+            ? .3
+            : age <= 32
+                ? .18
+                : .08;
 
 final class WeeklySimulator {
   const WeeklySimulator();
@@ -20,6 +32,28 @@ final class WeeklySimulator {
   static const _worldSimulator = WorldSimulator();
   static const _reportGenerator = MatchReportGenerator();
   static const _newsEngine = NewsEngine();
+
+  TrainingPreview previewTraining({
+    required CareerSnapshot snapshot,
+    required PlayerAttribute focus,
+    required TrainingIntensity intensity,
+    RewardModifiers modifiers = RewardModifiers.standard,
+  }) {
+    final paused = snapshot.phase == CareerPhase.internationalTournament;
+    final training =
+        paused ? null : _trainingOutcome(snapshot, focus, intensity, modifiers);
+    return TrainingPreview(
+      attributeBefore: snapshot.player.attributes[focus],
+      attributeAfter: training?.player.attributes[focus] ??
+          snapshot.player.attributes[focus],
+      fitnessBefore: snapshot.player.fitness,
+      fitnessAfter: training?.player.fitness ?? snapshot.player.fitness,
+      remainder:
+          training?.remainder ?? snapshot.developmentProgress[focus] ?? 0,
+      multiplier: modifiers.developmentMultiplier,
+      paused: paused,
+    );
+  }
 
   SpotlightPreview previewSpotlight({
     required CareerSnapshot snapshot,
@@ -109,7 +143,11 @@ final class WeeklySimulator {
     SituationOption? situationOption,
     RewardModifiers modifiers = RewardModifiers.standard,
     WorldDefinition? definition,
+    ContentCatalog? catalog,
   }) {
+    if (snapshot.pendingEventId != null)
+      throw StateError(
+          'Resolve the pending off-pitch decision before the next match.');
     final world = definition ?? buildLaunchWorld();
     final isNationalPostseason =
         snapshot.phase == CareerPhase.internationalTournament;
@@ -157,7 +195,9 @@ final class WeeklySimulator {
     final success = selected && roll < preview.chance;
 
     final rating = selection.status == SelectionStatus.omitted
-        ? 5.8
+        ? snapshot.usesModernCareerRules
+            ? 0.0
+            : 5.8
         : roundTo(
             (success ? 7.65 : 6.15) +
                 (success ? situationOption?.ratingUpside ?? 0 : 0) +
@@ -175,9 +215,28 @@ final class WeeklySimulator {
             SpotlightApproach.bold => 0.82,
           }
         : 0.05;
-    final goals = selected && rng.nextDouble() < goalChance ? 1 : 0;
-    final assists =
-        selected && success && goals == 0 && rng.nextDouble() < 0.38 ? 1 : 0;
+    final roleGoalFactor = snapshot.usesModernCareerRules
+        ? switch (snapshot.player.position) {
+            PositionFamily.striker => 1.0,
+            PositionFamily.winger => .7,
+            PositionFamily.midfielder => .35,
+            PositionFamily.defender => .12
+          }
+        : 1.0;
+    final goals =
+        selected && rng.nextDouble() < goalChance * roleGoalFactor ? 1 : 0;
+    final assistChance = snapshot.usesModernCareerRules
+        ? switch (snapshot.player.position) {
+            PositionFamily.striker => .38,
+            PositionFamily.winger => .55,
+            PositionFamily.midfielder => .68,
+            PositionFamily.defender => .18
+          }
+        : .38;
+    var assists =
+        selected && success && goals == 0 && rng.nextDouble() < assistChance
+            ? 1
+            : 0;
 
     final authoredTrust = situationOption?.trustRisk ?? 0;
     final earnedTrustDelta = selection.status == SelectionStatus.omitted
@@ -323,6 +382,10 @@ final class WeeklySimulator {
       goals,
       _poisson(expectedGoals, rng).clamp(0, 6),
     );
+    // Suppress an impossible assist without another random draw. Older
+    // published rules retain their exact ledger and seed consumption.
+    if (snapshot.usesModernCareerRules && assists > playerClubGoals - goals)
+      assists = (playerClubGoals - goals).clamp(0, assists);
     final rivalGoals = _poisson(opponentExpectedGoals, rng).clamp(0, 6);
     TeamResult teamResult = playerClubGoals > rivalGoals
         ? TeamResult.win
@@ -399,6 +462,7 @@ final class WeeklySimulator {
             goals: goals,
             assists: assists,
             rating: rating,
+            countOnlyAppearances: snapshot.usesModernCareerRules,
           );
     final isNationalAppearance =
         opponent.competitionKind == CompetitionKind.nationalTournament &&
@@ -636,6 +700,58 @@ final class WeeklySimulator {
       metrics: metrics,
       agentReleased: agentReleased,
     );
+    final roleStats = snapshot.usesModernCareerRules && selected
+        ? _roleContributions(playerAfterTraining, success, rating,
+            opponent.isHome ? awayScore : homeScore, teamResult)
+        : const RoleStats();
+    nextSnapshot = updateCareerGoal(nextSnapshot.copyWith(
+        roleStats: snapshot.roleStats.add(roleStats),
+        matchJournal: [
+          MatchJournalEntry(
+              id:
+                  '${snapshot.season}:${snapshot.week}:${opponent.competitionId ?? opponent.clubId}:${snapshot.revision}',
+              season: snapshot.season,
+              week: isNationalPostseason
+                  ? snapshot.nationalTeam.tournamentMatchday
+                  : snapshot.week,
+              clubName: playerTeamName,
+              opponentName: opponent.clubName,
+              isHome: opponent.isHome,
+              homeScore: homeScore,
+              awayScore: awayScore,
+              rating: rating,
+              goals: goals,
+              assists: assists,
+              appeared: selected,
+              headline: headline,
+              report: matchReport,
+              roleStats: roleStats,
+              competitionId: opponent.competitionId,
+              metrics: {
+                'possession': possession,
+                'shots': shots,
+                'shotsOnTarget': shotsOnTarget,
+                'expectedGoals': expectedGoals,
+                'opponentExpectedGoals': opponentExpectedGoals,
+                'bigChances': bigChances,
+                'momentumSwings': momentumSwings,
+                'lateDrama': lateDrama,
+                'comeback': comeback
+              }),
+          ...snapshot.matchJournal
+        ].take(40).toList(growable: false)));
+    if (catalog != null && nextSnapshot.phase == CareerPhase.inSeason) {
+      const engine = CareerEngine();
+      final nextOpponent =
+          _worldSimulator.opponentFor(nextSnapshot, definition: world);
+      final event = engine.selectNextEvent(nextSnapshot, catalog,
+          previousRating: rating,
+          previousHighStakes:
+              opponent.competitionKind != CompetitionKind.league,
+          nextHighStakes:
+              nextOpponent.competitionKind != CompetitionKind.league);
+      if (event != null) nextSnapshot = engine.queueEvent(nextSnapshot, event);
+    }
     final storyIds = newsStories.map((story) => story.id).toSet();
     nextSnapshot = nextSnapshot.copyWith(
       newsFeed: [
@@ -684,6 +800,35 @@ final class WeeklySimulator {
     );
   }
 
+  RoleStats _roleContributions(PlayerState player, bool success, double rating,
+      int conceded, TeamResult result) {
+    final created = success
+        ? (1 + player.attributes[PlayerAttribute.passing] ~/ 45).clamp(1, 3)
+        : 0;
+    return RoleStats(
+        keyPasses: player.position == PositionFamily.midfielder ? created : 0,
+        chancesCreated: player.position == PositionFamily.midfielder ||
+                player.position == PositionFamily.winger
+            ? created
+            : 0,
+        successfulDribbles: player.position == PositionFamily.winger
+            ? (success
+                ? 1 + player.attributes[PlayerAttribute.technique] ~/ 35
+                : 0)
+            : 0,
+        tackles: player.position == PositionFamily.defender
+            ? (1 +
+                player.attributes[PlayerAttribute.defending] ~/ 30 +
+                (success ? 2 : 0))
+            : 0,
+        interceptions:
+            player.position == PositionFamily.defender ? (success ? 2 : 1) : 0,
+        cleanSheets:
+            player.position == PositionFamily.defender && conceded == 0 ? 1 : 0,
+        playerOfMatchAwards:
+            success && rating >= 8.0 && result == TeamResult.win ? 1 : 0);
+  }
+
   int _poisson(double lambda, _DeterministicRandom rng) {
     final limit = math.exp(-lambda);
     var product = 1.0;
@@ -719,8 +864,12 @@ final class WeeklySimulator {
     };
     final player = snapshot.player;
     final currentProgress = snapshot.developmentProgress[focus] ?? 0;
-    final accumulated =
-        currentProgress + baseGain * modifiers.developmentMultiplier;
+    final accumulated = currentProgress +
+        baseGain *
+            modifiers.developmentMultiplier *
+            (snapshot.usesModernCareerRules
+                ? ageDevelopmentMultiplier(player.age)
+                : 1);
     final room = 99 - player.attributes[focus];
     final gain = accumulated.floor().clamp(0, room).toInt();
     final capped = gain >= room;

@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../util/uuid.dart';
 import 'api_models.dart';
+import 'online_models.dart';
 
 typedef AccessTokenReader = Future<String?> Function();
 
@@ -28,6 +29,12 @@ final class ElevenwardApi {
   final Uri baseUri;
   final http.Client _client;
   final AccessTokenReader _accessToken;
+  int _sessionEpoch = 0;
+
+  /// Invalidates every pending request when the authenticated identity changes.
+  /// Capturing this epoch also protects foreground friends/challenge actions.
+  void invalidateSession() => _sessionEpoch += 1;
+
   static const _requestTimeout = Duration(seconds: 15);
 
   Uri _uri(String path, [Map<String, String>? query]) =>
@@ -68,14 +75,55 @@ final class ElevenwardApi {
     );
   }
 
+  Future<ElevenwardAccount> updatePublicUsername(String username) async {
+    final body = await _send(
+      'PUT',
+      '/account/username',
+      body: {'username': username.trim()},
+    );
+    return ElevenwardAccount.fromJson(
+      (body['account'] as Map).cast<String, Object?>(),
+    );
+  }
+
+  Future<ElevenwardAccount> updateLeaderboardSharing(
+    bool enabled, {
+    bool Function()? isCurrentSession,
+  }) async {
+    final body = await _send(
+      'PUT',
+      '/account/leaderboard-sharing',
+      isCurrentSession: isCurrentSession,
+      body: {'enabled': enabled},
+    );
+    return ElevenwardAccount.fromJson(
+      (body['account'] as Map).cast<String, Object?>(),
+    );
+  }
+
+  Future<void> reportLeaderboardUsername({
+    required String profileId,
+    required String reason,
+  }) => _sendEmpty(
+    'POST',
+    '/leaderboard-reports',
+    body: {'profileId': profileId, 'reason': reason},
+  );
+
   Future<void> signOut() => _sendEmpty('POST', '/auth/sign-out');
   Future<void> deleteAccount() => _sendEmpty('DELETE', '/account');
 
   Future<Map<String, Object?>> createDeletionChallenge() =>
       _send('POST', '/account/deletion-challenge');
 
-  Future<List<RemoteCareerSlot>> careerSlots() async {
-    final body = await _send('GET', '/career-slots');
+  Future<List<RemoteCareerSlot>> careerSlots({
+    bool Function()? isCurrentSession,
+  }) async {
+    final body = await _send(
+      'GET',
+      '/career-slots',
+      isCurrentSession: isCurrentSession,
+    );
     return (body['slots'] as List<Object?>)
         .map(
           (item) =>
@@ -88,15 +136,19 @@ final class ElevenwardApi {
     required int slotIndex,
     required int baseRevision,
     required CareerSnapshot snapshot,
+    required bool publishLeaderboard,
     String? idempotencyKey,
+    bool Function()? isCurrentSession,
   }) async {
     final response = await _raw(
       'PUT',
       '/career-slots/$slotIndex/sync',
+      isCurrentSession: isCurrentSession,
       body: {
         'baseRevision': baseRevision,
         'idempotencyKey': idempotencyKey ?? generateUuidV4(),
         'snapshot': snapshot.toJson(),
+        'publishLeaderboard': publishLeaderboard,
       },
     );
     final body = _decode(response);
@@ -117,11 +169,21 @@ final class ElevenwardApi {
     required int slotIndex,
     required String conflictId,
     required String choice,
+    required bool publishLeaderboard,
+    CareerSnapshot? localSnapshot,
+    int? expectedRemoteRevision,
+    bool Function()? isCurrentSession,
   }) async {
     final body = await _send(
       'POST',
       '/career-slots/$slotIndex/conflicts/$conflictId/resolve',
-      body: {'choice': choice},
+      isCurrentSession: isCurrentSession,
+      body: {
+        'choice': choice,
+        'publishLeaderboard': publishLeaderboard,
+        if (localSnapshot != null) 'localSnapshot': localSnapshot.toJson(),
+        'expectedRemoteRevision': ?expectedRemoteRevision,
+      },
     );
     final slot = body['slot'];
     return slot == null
@@ -132,10 +194,12 @@ final class ElevenwardApi {
   Future<SyncOutcome> deleteCareerSlot({
     required int slotIndex,
     required int baseRevision,
+    bool Function()? isCurrentSession,
   }) async {
     final response = await _raw(
       'DELETE',
       '/career-slots/$slotIndex',
+      isCurrentSession: isCurrentSession,
       query: {'baseRevision': '$baseRevision'},
     );
     final body = _decode(response);
@@ -213,7 +277,7 @@ final class ElevenwardApi {
     },
   );
 
-  Future<List<Map<String, Object?>>> leaderboard({
+  Future<List<LeaderboardEntry>> leaderboard({
     required PositionFamily position,
     required Difficulty difficulty,
     required String rulesVersion,
@@ -221,22 +285,126 @@ final class ElevenwardApi {
     final body = await _send(
       'GET',
       '/leaderboards',
-      authenticated: false,
       query: {
         'position': position.name,
         'difficulty': _apiDifficulty(difficulty),
         'rulesVersion': rulesVersion,
+        'limit': '25',
       },
     );
     return (body['entries'] as List<Object?>)
-        .map((item) => (item as Map).cast<String, Object?>())
+        .map(
+          (item) =>
+              LeaderboardEntry.fromJson((item as Map).cast<String, Object?>()),
+        )
         .toList(growable: false);
   }
+
+  Future<LeaderboardPage> leaderboardPage({
+    required PositionFamily position,
+    required Difficulty difficulty,
+    required String rulesVersion,
+    String? careerId,
+  }) async {
+    final body = await _send(
+      'GET',
+      '/leaderboards',
+      query: {
+        'position': position.name,
+        'difficulty': _apiDifficulty(difficulty),
+        'rulesVersion': rulesVersion,
+        'limit': '25',
+        'careerId': ?careerId,
+      },
+    );
+    return LeaderboardPage.fromJson(body);
+  }
+
+  Future<void> sendFeedback(Map<String, Object?> submission) =>
+      _sendEmpty('POST', '/feedback', authenticated: false, body: submission);
+
+  Future<List<CareerSnapshot>> archives({
+    bool Function()? isCurrentSession,
+  }) async {
+    final body = await _send(
+      'GET',
+      '/career-archives',
+      isCurrentSession: isCurrentSession,
+    );
+    return (body['archives'] as List)
+        .map(
+          (e) => CareerSnapshot.fromJson(
+            onlineObject(onlineObject(e)['snapshot']),
+          ),
+        )
+        .toList();
+  }
+
+  Future<void> archive(
+    CareerSnapshot snapshot, {
+    bool Function()? isCurrentSession,
+  }) => _sendEmpty(
+    'POST',
+    '/career-archives',
+    isCurrentSession: isCurrentSession,
+    body: {'snapshot': snapshot.toJson()},
+  );
+  Future<void> deleteArchive(
+    String careerId, {
+    bool Function()? isCurrentSession,
+  }) => _sendEmpty(
+    'DELETE',
+    '/career-archives/$careerId',
+    isCurrentSession: isCurrentSession,
+  );
+  Future<FriendsState> friends() async =>
+      FriendsState.fromJson(await _send('GET', '/friends'));
+  Future<void> setFriendSharing(bool enabled) => _sendEmpty(
+    'PUT',
+    '/account/friend-comparison-sharing',
+    body: {'enabled': enabled},
+  );
+  Future<Map<String, Object?>> createFriendCode() =>
+      _send('POST', '/friends/invite-code', body: {});
+  Future<void> requestFriend(String inviteCode) =>
+      _sendEmpty('POST', '/friends/requests', body: {'inviteCode': inviteCode});
+  Future<void> respondFriend(String requestId, bool accept) => _sendEmpty(
+    'POST',
+    '/friends/requests/$requestId/respond',
+    body: {'accept': accept},
+  );
+  Future<void> removeFriend(String profileId) =>
+      _sendEmpty('DELETE', '/friends/$profileId');
+  Future<void> blockFriend(String profileId) =>
+      _sendEmpty('POST', '/friends/$profileId/block', body: {});
+  Future<void> unblockFriend(String profileId) =>
+      _sendEmpty('DELETE', '/friends/$profileId/block');
+  Future<ChallengeState> currentChallenge() async =>
+      ChallengeState.fromJson(await _send('GET', '/challenges/current'));
+  Future<ChallengeAttempt> enrollChallenge(String challengeId) async {
+    final body = await _send(
+      'POST',
+      '/challenges/$challengeId/enroll',
+      body: {},
+    );
+    return ChallengeAttempt.fromJson(onlineObject(body['attempt']));
+  }
+
+  Future<Map<String, Object?>> submitChallenge(
+    String challengeId,
+    String attemptId,
+    List<Map<String, Object?>> actions,
+  ) => _send(
+    'POST',
+    '/challenges/$challengeId/submit',
+    body: {'attemptId': attemptId, 'actions': actions},
+  );
 
   Future<Map<String, Object?>> _send(
     String method,
     String path, {
     bool authenticated = true,
+    bool Function()? isCurrentSession,
     Map<String, Object?>? body,
     Map<String, String>? query,
   }) async {
@@ -244,6 +412,7 @@ final class ElevenwardApi {
       method,
       path,
       authenticated: authenticated,
+      isCurrentSession: isCurrentSession,
       body: body,
       query: query,
     );
@@ -256,12 +425,14 @@ final class ElevenwardApi {
     String method,
     String path, {
     bool authenticated = true,
+    bool Function()? isCurrentSession,
     Map<String, Object?>? body,
   }) async {
     final response = await _raw(
       method,
       path,
       authenticated: authenticated,
+      isCurrentSession: isCurrentSession,
       body: body,
     );
     final decoded = _decode(response);
@@ -272,18 +443,30 @@ final class ElevenwardApi {
     String method,
     String path, {
     bool authenticated = true,
+    bool Function()? isCurrentSession,
     Map<String, Object?>? body,
     Map<String, String>? query,
   }) async {
+    final requestSession = _sessionEpoch;
+    void checkSession() {
+      if (requestSession != _sessionEpoch ||
+          isCurrentSession?.call() == false) {
+        throw StateError('Account changed during the request.');
+      }
+    }
+
+    checkSession();
     final headers = <String, String>{'accept': 'application/json'};
     if (body != null) headers['content-type'] = 'application/json';
     if (authenticated) {
       final token = await _accessToken();
+      checkSession();
       if (token == null) throw const ApiFailure(401, 'Sign in is required.');
       headers['authorization'] = 'Bearer $token';
     }
     final uri = _uri(path, query);
     final encoded = body == null ? null : jsonEncode(body);
+    checkSession();
     final request = switch (method) {
       'GET' => _client.get(uri, headers: headers),
       'POST' => _client.post(uri, headers: headers, body: encoded),
@@ -291,7 +474,9 @@ final class ElevenwardApi {
       'DELETE' => _client.delete(uri, headers: headers, body: encoded),
       _ => throw ArgumentError.value(method, 'method'),
     };
-    return request.timeout(_requestTimeout);
+    final response = await request.timeout(_requestTimeout);
+    checkSession();
+    return response;
   }
 
   Map<String, Object?> _decode(http.Response response) {

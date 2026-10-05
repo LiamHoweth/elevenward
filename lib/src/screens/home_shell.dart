@@ -23,21 +23,40 @@ final class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final career = widget.controller.activeCareer!;
+    final generation = widget.controller.activeCareerGeneration;
     final screens = [
       GameScreen(
         key: ValueKey(career.careerId),
         initialCareer: career,
+        activeCareerGeneration: generation,
         initialFocus: widget.controller.activeWeeklyFocus,
         avatarId: widget.controller.avatarId,
+        shareCardStyleId: widget.controller.shareCardStyleId,
         rewardModifiers: widget.controller.entitlementState.rewardModifiers,
+        quickTransitions: widget.controller.quickTransitions,
+        showCoachingTips: widget.controller.showCoachingTips,
+        showCareerTarget: widget.controller.showCareerTarget,
+        dismissedCoachTips: widget.controller.dismissedCoachTips,
+        onDismissCoachTip: widget.controller.dismissCoachTip,
+        trainingPreset: widget.controller.trainingPreset,
+        onSaveTrainingPreset: widget.controller.saveTrainingPreset,
+        onClearTrainingPreset: widget.controller.clearTrainingPreset,
         contentCatalog: widget.controller.activeContent?.catalog,
         onFocusPreferenceChanged: widget.controller.changeWeeklyFocus,
-        onCareerChanged: (snapshot, eventType) =>
-            widget.controller.saveCareer(snapshot, eventType: eventType),
-        onReviewOpportunity: widget.controller.requestReviewAfterSeason,
+        onCareerChanged: (snapshot, eventType) => widget.controller.saveCareer(
+          snapshot,
+          eventType: eventType,
+          expectedGeneration: generation,
+          expectedCareerId: career.careerId,
+          expectedRevision: career.revision,
+        ),
+        onReviewOpportunity: (snapshot, isEligible) => widget.controller
+            .requestReviewAfterSeason(snapshot, isEligible: isEligible),
+        reviewPromptVisible: _index == 0,
       ),
       WorldScreen(
         career: career,
+        controller: widget.controller,
         definition: widget.controller.activeContent?.catalog.world,
       ),
       LifeScreen(

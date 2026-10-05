@@ -35,7 +35,7 @@ final class _LanguageSelectionScreenState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(
+                Icon(
                   Icons.language_rounded,
                   color: ElevenwardColors.grass,
                   size: 52,
@@ -47,7 +47,7 @@ final class _LanguageSelectionScreenState
                   style: Theme.of(context).textTheme.headlineMedium,
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Elige tu idioma · Escolha seu idioma · Choisissez votre langue',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: ElevenwardColors.muted, height: 1.4),
@@ -106,10 +106,7 @@ final class _LanguageOption extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
           child: Row(
             children: [
-              const Icon(
-                Icons.translate_rounded,
-                color: ElevenwardColors.grass,
-              ),
+              Icon(Icons.translate_rounded, color: ElevenwardColors.grass),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(
@@ -119,7 +116,7 @@ final class _LanguageOption extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: const TextStyle(color: ElevenwardColors.muted),
+                      style: TextStyle(color: ElevenwardColors.muted),
                     ),
                   ],
                 ),

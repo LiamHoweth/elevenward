@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:elevenward_core/elevenward_core.dart';
+
 /// Release gate for the 20 real-engine shards. Refuses missing, duplicate,
 /// overlapping, failed, or incomplete reports rather than merely uploading them.
 void main(List<String> paths) {
@@ -38,8 +40,9 @@ void main(List<String> paths) {
         .values
         .cast<int>()
         .fold(0, (a, b) => a + b);
-    if (completed != report['careers'])
+    if (completed != report['careers']) {
       throw StateError('Shard did not complete all requested careers.');
+    }
     next += completed;
     weeks += report['weeks'] as int;
     for (final name in [
@@ -69,7 +72,7 @@ void main(List<String> paths) {
     'positionCounts': 4,
     'archetypeCounts': 12,
     'difficultyCounts': 3,
-    'startingLeagueCounts': 12,
+    'startingLeagueCounts': buildLaunchWorld().leagues.length,
     'retirementSeasonCounts': 5,
     'competitionCompletions': 3,
     'transferCounts': 3,
@@ -82,6 +85,14 @@ void main(List<String> paths) {
         counts.values.any((count) => count <= 0)) {
       throw StateError('Incomplete ${requirement.key} coverage.');
     }
+  }
+  final expectedLeagues =
+      buildLaunchWorld().leagues.map((league) => league.id).toSet();
+  final observedLeagues = coverage['startingLeagueCounts']!.keys.toSet();
+  if (expectedLeagues.difference(observedLeagues).isNotEmpty ||
+      observedLeagues.difference(expectedLeagues).isNotEmpty) {
+    throw StateError(
+        'Starting league coverage does not match the shipped world.');
   }
   final json = '${const JsonEncoder.withIndent('  ').convert({
         'passed': true,

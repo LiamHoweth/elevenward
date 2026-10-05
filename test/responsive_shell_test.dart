@@ -287,6 +287,101 @@ void main() {
     }
   });
 
+  testWidgets('every position exposes three styles and requires a choice', (
+    tester,
+  ) async {
+    final controller = _controller(store, credentials, api, content);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(_creatorApp(controller));
+    await tester.enterText(find.byKey(const Key('career-first-name')), 'Ari');
+    await tester.enterText(find.byKey(const Key('career-last-name')), 'Vale');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pump();
+    expect(find.byKey(const Key('career-creator-step-0')), findsOneWidget);
+    expect(
+      find.text('Choose a position and play style to continue.'),
+      findsOneWidget,
+    );
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    for (final position in PositionFamily.values) {
+      await _tapCreatorControl(
+        tester,
+        find.byKey(Key('career-position-${position.name}')),
+        step: 0,
+      );
+      final matching = Archetype.values
+          .where((style) => style.positionFamily == position)
+          .toList();
+      expect(matching, hasLength(3));
+      for (final style in Archetype.values) {
+        expect(
+          find.byKey(Key('career-archetype-${style.name}')),
+          style.positionFamily == position ? findsOneWidget : findsNothing,
+        );
+      }
+      await _tapCreatorControl(
+        tester,
+        find.byKey(Key('career-archetype-${matching.last.name}')),
+        step: 0,
+      );
+    }
+
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-position-striker')),
+      step: 0,
+    );
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pump();
+    expect(find.byKey(const Key('career-creator-step-0')), findsOneWidget);
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-archetype-poacher')),
+      step: 0,
+    );
+
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('career-creator-step-1')), findsOneWidget);
+    _expectNoLayoutError(tester, 'position-first role selection');
+  });
+
+  testWidgets('role cards fit every locale at 200 percent text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 568);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final controller = _controller(store, credentials, api, content);
+    addTearDown(controller.dispose);
+
+    for (final locale in AppLocalizations.supportedLocales) {
+      await tester.pumpWidget(_creatorApp(controller, locale: locale));
+      await tester.pumpAndSettle();
+      await _tapCreatorControl(
+        tester,
+        find.byKey(const Key('career-position-defender')),
+        step: 0,
+      );
+      await tester.dragUntilVisible(
+        find.byKey(const Key('career-archetype-attackingFullback')),
+        find.byKey(const Key('career-creator-step-0')),
+        const Offset(0, -220),
+      );
+      _expectNoLayoutError(tester, 'role cards in ${locale.toLanguageTag()}');
+    }
+  });
+
   testWidgets('four-step career creation remains usable at 200 percent text', (
     tester,
   ) async {
@@ -317,6 +412,47 @@ void main() {
 
     await tester.enterText(find.byKey(const Key('career-first-name')), 'Mika');
     await tester.enterText(find.byKey(const Key('career-last-name')), 'Vale');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const Key('career-creator-step-0')),
+      const Offset(0, -600),
+    );
+    await tester.ensureVisible(find.byKey(const Key('career-choose-portrait')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('career-choose-portrait')));
+    await tester.pumpAndSettle();
+    final portraitGrid = tester.widget<GridView>(
+      find.byKey(const Key('career-portrait-grid')),
+    );
+    expect(portraitGrid.childrenDelegate.estimatedChildCount, 30);
+    await tester.tap(find.byKey(const Key('career-portrait-player_02')));
+    await tester.pumpAndSettle();
+    final selectedPortrait = tester.widget<Image>(
+      find.descendant(
+        of: find.byKey(const Key('career-selected-portrait')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      (selectedPortrait.image as AssetImage).assetName,
+      'assets/visual/player_portraits/player_02.webp',
+    );
+    _expectNoLayoutError(tester, 'career portrait selection');
+
+    await tester.ensureVisible(
+      find.byKey(const Key('career-position-striker')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('career-position-striker')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(
+      find.byKey(const Key('career-archetype-poacher')),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('career-archetype-poacher')));
+    await tester.pumpAndSettle();
+
     await tester.tap(find.byKey(const Key('career-create-next')));
     await tester.pumpAndSettle();
     _expectNoLayoutError(tester, 'career creation nationality');
@@ -354,18 +490,21 @@ void main() {
     await tester.pump(const Duration(seconds: 5));
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('league-shortcut-england')),
-      120,
-      scrollable: find
+    final clubScroll = tester.state<ScrollableState>(
+      find
           .descendant(
             of: find.byKey(const Key('career-creator-step-2')),
             matching: find.byType(Scrollable),
           )
           .first,
     );
-    await tester.tap(find.byKey(const Key('league-shortcut-england')));
+    clubScroll.position.jumpTo(0);
     await tester.pumpAndSettle();
+    await tester.dragUntilVisible(
+      find.byKey(const Key('club-search')),
+      find.byKey(const Key('career-creator-step-2')),
+      const Offset(0, -100),
+    );
     await tester.enterText(
       find.byKey(const Key('club-search')),
       'Northstar Athletic',
@@ -390,12 +529,233 @@ void main() {
     expect(find.byKey(const Key('career-create-save')), findsOneWidget);
     expect(find.text('Mika Vale'), findsOneWidget);
     _expectNoLayoutError(tester, 'career creation review');
+    await tester.dragUntilVisible(
+      find.text('World class'),
+      find.byKey(const Key('career-creator-step-3')),
+      const Offset(0, -250),
+    );
+    _expectNoLayoutError(tester, 'career difficulty at large text');
+  });
+
+  testWidgets('club search, review edits, and saved career stay in sync', (
+    tester,
+  ) async {
+    final controller = _controller(store, credentials, api, content);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(_creatorApp(controller));
+    await tester.enterText(find.byKey(const Key('career-first-name')), 'Ari');
+    await tester.enterText(find.byKey(const Key('career-last-name')), 'Vale');
+    tester.testTextInput.hide();
+    await tester.pumpAndSettle();
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-position-midfielder')),
+      step: 0,
+    );
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-archetype-playmaker')),
+      step: 0,
+    );
+    await tester.dragUntilVisible(
+      find.byKey(const Key('career-selected-portrait')),
+      find.byKey(const Key('career-creator-step-0')),
+      const Offset(0, 250),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Ari Vale'), findsOneWidget);
+    expect(find.text('Midfielder · Playmaker'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('popular-nationality-england')),
+      step: 1,
+    );
+    await tester.dragUntilVisible(
+      find.text('Country you will represent'),
+      find.byKey(const Key('career-creator-step-1')),
+      const Offset(0, 200),
+    );
+    expect(find.text('Country you will represent'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(
+      find.byKey(const Key('club-search')),
+      'Northstar Athletic',
+    );
+    await tester.pumpAndSettle();
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('starting-club-england-northstar-athletic')),
+      step: 2,
+    );
+    expect(find.text('Northstar Athletic'), findsWidgets);
+    await _tapCreatorControl(tester, find.text('Browse leagues'), step: 2);
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const ValueKey('region-europe')),
+      step: 2,
+    );
+    await tester.tap(find.text('South America').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Northstar Athletic'), findsNothing);
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('league-shortcut-spain')),
+      step: 2,
+      scrollDelta: 250,
+    );
+    expect(find.text('Northstar Athletic'), findsNothing);
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pump();
+    expect(find.byKey(const Key('career-creator-step-2')), findsOneWidget);
+
+    await tester.dragUntilVisible(
+      find.byKey(const Key('club-search')),
+      find.byKey(const Key('career-creator-step-2')),
+      const Offset(0, 200),
+    );
+    await tester.enterText(
+      find.byKey(const Key('club-search')),
+      'Ciudad Azahar',
+    );
+    await tester.pumpAndSettle();
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('starting-club-spain-ciudad-azahar')),
+      step: 2,
+    );
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('career-creator-step-3')), findsOneWidget);
+    await tester.dragUntilVisible(
+      find.text('Story'),
+      find.byKey(const Key('career-creator-step-3')),
+      const Offset(0, -200),
+    );
+    expect(find.text('Story'), findsOneWidget);
+    expect(
+      find.text(
+        'More forgiving spotlight decisions. Starting attributes stay the same.',
+      ),
+      findsOneWidget,
+    );
+
+    await _tapCreatorControl(tester, find.byTooltip('Edit Position'), step: 3);
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-position-defender')),
+      step: 0,
+    );
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-archetype-attackingFullback')),
+      step: 0,
+    );
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Defender'), findsOneWidget);
+    expect(find.text('Attacking fullback'), findsOneWidget);
+
+    await _tapCreatorControl(
+      tester,
+      find.byTooltip('Edit National team'),
+      step: 3,
+    );
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('popular-nationality-brazil')),
+      step: 1,
+    );
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Brazil'), findsOneWidget);
+
+    await _tapCreatorControl(
+      tester,
+      find.byTooltip('Edit Starting club'),
+      step: 3,
+    );
+    await tester.enterText(
+      find.byKey(const Key('club-search')),
+      'Northstar Athletic',
+    );
+    await tester.pumpAndSettle();
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('starting-club-england-northstar-athletic')),
+      step: 2,
+    );
+    await tester.tap(find.byKey(const Key('career-create-next')));
+    await tester.pumpAndSettle();
+    expect(find.text('Northstar Athletic'), findsOneWidget);
+
+    await _tapCreatorControl(tester, find.byTooltip('Edit Position'), step: 3);
+    await _tapCreatorControl(
+      tester,
+      find.byKey(const Key('career-position-striker')),
+      step: 0,
+    );
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(find.text('Defender'), findsOneWidget);
+
+    await _tapCreatorControl(tester, find.text('World class'), step: 3);
+    await tester.tap(find.byKey(const Key('career-create-save')));
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (controller.activeSlotIndex != 0 || controller.activeCareer == null) {
+      if (DateTime.now().isAfter(deadline)) {
+        throw StateError('Career creation did not finish saving.');
+      }
+      await tester.pump();
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+    }
+    await tester.pump();
+    final saved = await tester.runAsync(() => store.loadSlot(0));
+    expect(saved?.player.name, 'Ari Vale');
+    expect(saved?.player.position, PositionFamily.defender);
+    expect(saved?.player.archetype, Archetype.attackingFullback);
+    expect(saved?.player.nationalTeamId, 'brazil');
+    expect(saved?.clubId, 'england-northstar-athletic');
+    expect(saved?.difficulty, Difficulty.worldClass);
+    expect(saved?.player.portraitId, 'player_01');
+    _expectNoLayoutError(tester, 'saved creator choices');
   });
 }
 
 void _expectNoLayoutError(WidgetTester tester, String reason) {
   final error = tester.takeException();
   expect(error, isNull, reason: reason);
+}
+
+Widget _creatorApp(AppController controller, {Locale? locale}) => MaterialApp(
+  theme: buildElevenwardTheme(),
+  locale: locale,
+  localizationsDelegates: AppLocalizations.localizationsDelegates,
+  supportedLocales: AppLocalizations.supportedLocales,
+  home: CreateCareerScreen(controller: controller, slotIndex: 0),
+);
+
+Future<void> _tapCreatorControl(
+  WidgetTester tester,
+  Finder control, {
+  required int step,
+  double scrollDelta = -250,
+}) async {
+  await tester.dragUntilVisible(
+    control,
+    find.byKey(Key('career-creator-step-$step')),
+    Offset(0, scrollDelta),
+  );
+  await tester.ensureVisible(control);
+  await tester.pumpAndSettle();
+  await tester.tap(control);
+  await tester.pumpAndSettle();
 }
 
 Widget _app(

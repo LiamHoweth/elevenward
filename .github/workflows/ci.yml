@@ -11,6 +11,8 @@ permissions:
 jobs:
   flutter:
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -19,6 +21,9 @@ jobs:
           flutter-version: '3.47.2'
           cache: true
       - run: flutter pub get
+      - name: Resolve core test dependencies
+        working-directory: packages/elevenward_core
+        run: dart pub get
       - run: flutter analyze
       - run: flutter test
       - run: cd packages/elevenward_core && dart analyze && dart test
@@ -30,6 +35,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

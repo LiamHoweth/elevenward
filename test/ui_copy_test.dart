@@ -5,6 +5,19 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   const locales = {'en', 'es', 'pt-BR', 'fr'};
 
+  test('fitness and current form have distinct French labels', () {
+    expect(uiCopy('fr', 'fitness'), isNot(uiCopy('fr', 'form')));
+  });
+
+  test('cup match labels never expose internal competition keys', () {
+    for (final locale in locales) {
+      for (final key in ['internationalClub', 'domesticCup']) {
+        expect(uiCopy(locale, key), isNot(key));
+        expect(uiCopy(locale, key).trim(), isNotEmpty);
+      }
+    }
+  });
+
   test('every interface copy key covers all launch languages', () {
     for (final entry in uiCopyTranslations.entries) {
       expect(

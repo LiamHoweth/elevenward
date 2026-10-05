@@ -2,7 +2,7 @@
 
 Elevenward is a portrait-first football career and life RPG for iOS and Android.
 This repository contains a playable, local-first pre-alpha: four positions,
-12 archetypes, 120 fictional clubs, 12 leagues, scheduled cup competitions,
+12 archetypes, 520 fictional clubs, 52 leagues, scheduled cup competitions,
 explicit national-team call-ups, career/life choices, and progression from age
 17 through retirement.
 
@@ -19,12 +19,23 @@ The interface only previews outcomes. All ratings, odds, seeded randomness,
 season progression, and durable state live in the platform-independent
 `packages/elevenward_core` Dart package.
 
+Career improvements now include role statistics, match/decision journals, durable
+mentor choices, personal ambitions, age-based development, tactical club styles,
+one-season loans, and a private Hall of Fame independent of career slots. Optional
+online features add friend invitations/comparisons, nearby ranks, guest support,
+and a standardized weekly challenge replayed by the backend. Implementation and
+verification details are in [the feature report](docs/FEATURES_2026_10_01.md).
+
 ## Run it
 
 ```sh
 flutter pub get
 flutter run
 ```
+
+To enable the free website discovery links in shared career cards and More,
+append `--dart-define-from-file=config/marketing.json` to your run or build.
+See [growth configuration and scope](docs/GROWTH_2026_10_05.md).
 
 The bundle identifier/application ID is `com.howethstudio.elevenward`. The app
 targets portrait iOS 15.1+ and Android API 26+, compiling and targeting Android
@@ -52,8 +63,13 @@ and season rollover.
 - `ios/` and `android/`: native mobile runners only; no web client is generated.
 
 SQLite journaling/recovery, optional account/cloud sync, purchase entitlements,
-four-language onboarding, opt-in leaderboards, and signed-content loading are
-implemented locally. Online/store flows still require production configuration
+four-language onboarding, account-based leaderboards, and signed-content loading are
+implemented locally. Signed-in careers publish after cloud sync under a generated
+alias or a moderated public username; an existing explicit opt-out stays private.
+Leaderboard sharing is an account setting, so disabling it removes entries and
+keeps them private across devices. Existing accounts start private until they
+choose to enable sharing.
+Online/store flows still require production configuration
 and sandbox qualification. The website lives at `howethstudio.com/elevenward/`;
 the API uses `api.howethstudio.com/v1/elevenward/` within the same studio domain.
 
@@ -78,10 +94,10 @@ The separate 100k CI workflow runs 20 non-overlapping 5,000-career shards and
 requires an aggregate coverage gate for positions, archetypes, difficulties,
 starting leagues, retirement seasons, competition completions, transfer types,
 national-team decisions, and promotion/relegation paths. The merger emits a
-durable aggregate JSON artifact. The current local
+durable aggregate JSON artifact. The historical local
 [100,000-career report](artifacts/verification/production-100000.json) passes with
-zero failures across 32,178,240 simulated weeks. The release revision still
-requires a successful hosted workflow run.
+zero failures across 32,178,240 simulated weeks. New rules `2026.5` passed a separate 1,000-career implementation sweep; the
+100k release gate requires a fresh successful run on the intended release revision.
 
 The manual `Signed release artifacts` workflow builds protected Android AAB and
 iOS IPA artifacts plus symbol files after environment approval. It requires real

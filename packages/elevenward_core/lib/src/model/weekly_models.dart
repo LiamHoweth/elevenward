@@ -10,6 +10,17 @@ final class WeeklyChoice {
     required this.spotlightApproach,
   });
 
+  factory WeeklyChoice.fromJson(Map<String, Object?> json) => WeeklyChoice(
+      focus: PlayerAttribute.values.byName(json['focus'] as String),
+      intensity: TrainingIntensity.values.byName(json['intensity'] as String),
+      spotlightApproach:
+          SpotlightApproach.values.byName(json['spotlightApproach'] as String));
+  Map<String, Object?> toJson() => {
+        'focus': focus.name,
+        'intensity': intensity.name,
+        'spotlightApproach': spotlightApproach.name
+      };
+
   final PlayerAttribute focus;
   final TrainingIntensity intensity;
   final SpotlightApproach spotlightApproach;
@@ -75,6 +86,27 @@ final class SelectionExplanation {
   final SelectionStatus status;
   final double score;
   final List<OutcomeFactor> reasons;
+}
+
+/// Exact training-only changes before match fatigue and other weekly effects.
+final class TrainingPreview {
+  const TrainingPreview(
+      {required this.attributeBefore,
+      required this.attributeAfter,
+      required this.fitnessBefore,
+      required this.fitnessAfter,
+      required this.remainder,
+      required this.multiplier,
+      required this.paused});
+  final int attributeBefore;
+  final int attributeAfter;
+  final int fitnessBefore;
+  final int fitnessAfter;
+  final double remainder;
+  final double multiplier;
+  final bool paused;
+  int get gain => attributeAfter - attributeBefore;
+  int get fitnessChange => fitnessAfter - fitnessBefore;
 }
 
 final class StatDeltas {

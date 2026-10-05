@@ -55,12 +55,16 @@ final class ReviewPromptService {
   /// Requests a review only at a completed-season break, after the player has
   /// experienced a full season. StoreKit retains final control over whether the
   /// prompt is actually displayed.
-  Future<bool> requestAfterSeason(CareerSnapshot snapshot) async {
+  Future<bool> requestAfterSeason(
+    CareerSnapshot snapshot, {
+    bool Function()? isEligible,
+  }) async {
     if (_requestInFlight ||
         !_platformSupported ||
         snapshot.phase != CareerPhase.offseason ||
-        snapshot.week != 18 ||
-        snapshot.season < 1) {
+        snapshot.week < 18 ||
+        snapshot.season < 1 ||
+        isEligible?.call() == false) {
       return false;
     }
 
@@ -83,6 +87,9 @@ final class ReviewPromptService {
       }
 
       if (!await _requester.isAvailable()) return false;
+      // Storage/platform checks can outlive the visible season break. Recheck
+      // immediately before dispatch so another activity is not interrupted.
+      if (isEligible?.call() == false) return false;
       await _requester.requestReview();
       await store.setPreference(_lastRequestedVersionKey, version);
       await store.setPreference(

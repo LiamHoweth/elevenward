@@ -1,11 +1,14 @@
 import '../content/content_models.dart';
+import '../model/career_features.dart';
 import '../model/career_lifecycle.dart';
 import '../model/career_progress.dart';
 import '../model/career_snapshot.dart';
 import '../model/career_types.dart';
+import '../model/enums.dart';
 import '../model/reward_modifiers.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'tactical_fit.dart';
 import 'world_simulator.dart';
 
 final class CareerEngine {
@@ -13,6 +16,110 @@ final class CareerEngine {
 
   static const _worldSimulator = WorldSimulator();
   static const transferRequestManagerTrustPenalty = 8;
+
+  CareerSnapshot chooseCareerGoal(
+      {required CareerSnapshot snapshot,
+      required CareerGoalKind kind,
+      int? target,
+      required DateTime updatedAt}) {
+    if (snapshot.retired)
+      throw StateError('A retired career cannot choose a new ambition.');
+    if (kind == CareerGoalKind.cleanSheets &&
+        (!snapshot.usesModernCareerRules ||
+            snapshot.player.position != PositionFamily.defender))
+      throw StateError(
+          'Clean-sheet ambitions require a defender career using modern rules.');
+    if (kind == CareerGoalKind.nationalSelection &&
+        careerGoalValue(snapshot, kind) > 0) {
+      throw StateError('National selection has already been achieved.');
+    }
+    final count = target ??
+        switch (kind) {
+          CareerGoalKind.appearances => 25,
+          CareerGoalKind.goals => 20,
+          CareerGoalKind.assists => 20,
+          CareerGoalKind.cleanSheets => 10,
+          _ => 1
+        };
+    if (count < 1 ||
+        count > 1000 ||
+        (CareerGoalKind.values.indexOf(kind) >= 4 && count != 1)) {
+      throw ArgumentError.value(
+          count, 'target', 'Choose a positive achievable milestone.');
+    }
+    return snapshot.copyWith(
+        revision: snapshot.revision + 1,
+        updatedAt: updatedAt.toUtc(),
+        careerGoal: CareerGoal(
+            kind: kind,
+            target: count,
+            startValue: careerGoalValue(snapshot, kind),
+            chosenSeason: snapshot.season));
+  }
+
+  CareerEventDefinition? eventById(String id, ContentCatalog catalog) =>
+      catalog.careerEvents.where((event) => event.id == id).firstOrNull;
+  CareerEventDefinition? pendingEvent(
+          CareerSnapshot snapshot, ContentCatalog catalog) =>
+      snapshot.pendingEventId == null
+          ? null
+          : eventById(snapshot.pendingEventId!, catalog);
+
+  CareerSnapshot queueEvent(
+          CareerSnapshot snapshot, CareerEventDefinition event) =>
+      snapshot.copyWith(pendingEventId: event.id);
+
+  CareerEventDefinition? selectNextEvent(
+      CareerSnapshot snapshot, ContentCatalog catalog,
+      {required double previousRating,
+      required bool previousHighStakes,
+      required bool nextHighStakes}) {
+    if (snapshot.phase != CareerPhase.inSeason) return null;
+    final context = CareerEventContext(
+        previousPerformance: previousRating >= 7.5
+            ? PreviousMatchPerformance.standout
+            : previousRating >= 6.5
+                ? PreviousMatchPerformance.steady
+                : PreviousMatchPerformance.poor,
+        previousGameWasHighStakes: previousHighStakes,
+        nextGameIsHighStakes: nextHighStakes);
+    final events = eligibleEvents(snapshot, catalog)
+        .where((event) => event.matches(context))
+        .toList();
+    final story =
+        events.where((event) => event.id.startsWith('mentor-')).firstOrNull;
+    if (story != null) return story;
+    return events.isEmpty
+        ? null
+        : events[(snapshot.seed ^ snapshot.revision).abs() % events.length];
+  }
+
+  List<LoanOffer> loanOffers(CareerSnapshot snapshot,
+      {WorldDefinition? definition}) {
+    if (!snapshot.usesModernCareerRules ||
+        snapshot.phase != CareerPhase.offseason ||
+        snapshot.retired ||
+        snapshot.activeLoan != null ||
+        snapshot.contract.seasonsRemaining < 3) return const [];
+    final world = definition ?? buildLaunchWorld();
+    final candidates = world.clubs
+        .where((club) =>
+            club.id != snapshot.clubId &&
+            club.quality <= snapshot.player.overall + 2 &&
+            _interest(snapshot, club) >= 42)
+        .toList()
+      ..sort((a, b) =>
+          _tacticalFit(snapshot, b).compareTo(_tacticalFit(snapshot, a)));
+    return candidates
+        .take(3)
+        .map((club) => LoanOffer(
+            clubId: club.id,
+            tacticalFit: _tacticalFit(snapshot, club),
+            promisedRole: 'important',
+            reason:
+                'One season of first-team football. The host pays 100% of your existing wage and appearance bonus; you return to your parent contract next offseason.'))
+        .toList(growable: false);
+  }
 
   CareerSnapshot fileTransferRequest({
     required CareerSnapshot snapshot,
@@ -107,6 +214,7 @@ final class CareerEngine {
     CareerSnapshot snapshot, {
     WorldDefinition? definition,
   }) {
+    if (snapshot.activeLoan != null) return const [];
     final world = definition ?? buildLaunchWorld();
     final agent = agentFor(snapshot.activeAgentId);
     final clubs = [...world.clubs]..sort((left, right) {
@@ -225,7 +333,8 @@ final class CareerEngine {
     CareerSnapshot snapshot, {
     WorldDefinition? definition,
   }) {
-    if (snapshot.contract.seasonsRemaining > 1) return null;
+    if (snapshot.activeLoan != null || snapshot.contract.seasonsRemaining > 1)
+      return null;
     if (snapshot.player.managerTrust < 38 ||
         snapshot.contract.roleSatisfaction < 30) {
       return null;
@@ -338,6 +447,7 @@ final class CareerEngine {
     CareerSnapshot snapshot, {
     required DateTime updatedAt,
     ContractOffer? acceptedOffer,
+    LoanOffer? acceptedLoan,
     bool retire = false,
     WorldDefinition? definition,
   }) {
@@ -362,10 +472,23 @@ final class CareerEngine {
       averageRating: performance.averageRating,
       trophies: trophies,
     );
-    final withHistory = snapshot.copyWith(
+    var withHistory = snapshot.copyWith(
       seasonHistory: [...snapshot.seasonHistory, summary],
       updatedAt: updatedAt.toUtc(),
     );
+    final currentLeague = world.leagues.firstWhere((league) =>
+        league.id == snapshot.world.leagueIdForClub(snapshot.clubId));
+    final nextLeague = world.leagues.firstWhere(
+        (league) => league.id == nextWorld.leagueIdForClub(snapshot.clubId));
+    if (currentLeague.division == DivisionLevel.second &&
+        nextLeague.division == DivisionLevel.first) {
+      withHistory = withHistory.copyWith(storyFlags: {
+        ...withHistory.storyFlags,
+        'career.promotions':
+            '${(int.tryParse(withHistory.storyFlags['career.promotions'] ?? '0') ?? 0) + 1}'
+      });
+    }
+    withHistory = updateCareerGoal(withHistory);
     if (retire || mustRetire(withHistory)) {
       if (retire &&
           !canChooseRetirement(withHistory) &&
@@ -373,9 +496,85 @@ final class CareerEngine {
         throw StateError('Retirement is not available yet.');
       }
       return retireCareer(withHistory, updatedAt.toUtc()).copyWith(
+        clearActiveLoan: true,
+        clearPendingEvent: true,
         clearTransferRequest: true,
         clearTransferRequestTrustPenaltySeason: true,
       );
+    }
+
+    if (acceptedOffer != null && acceptedLoan != null)
+      throw StateError('Choose a transfer or a loan, not both.');
+    final activeLoan = snapshot.activeLoan;
+    if (activeLoan != null) {
+      if (acceptedLoan != null || acceptedOffer != null)
+        throw StateError(
+            'Finish the loan and return before arranging another move.');
+      final parent =
+          world.clubs.firstWhere((club) => club.id == activeLoan.parentClubId);
+      final remaining = activeLoan.parentContract.seasonsRemaining - 1;
+      if (remaining < 1)
+        throw StateError(
+            'The parent contract expired. A loan must retain a guaranteed return season.');
+      return withHistory.copyWith(
+          revision: snapshot.revision + 1,
+          updatedAt: updatedAt.toUtc(),
+          season: snapshot.season + 1,
+          week: 1,
+          clubId: parent.id,
+          clubName: parent.name,
+          points: 0,
+          player: snapshot.player.copyWith(
+              age: snapshot.player.age + 1,
+              fitness: (snapshot.player.fitness + 12).clamp(1, 100),
+              form: 55),
+          phase: CareerPhase.inSeason,
+          world: nextWorld,
+          seasonPerformance: const SeasonPerformance(),
+          contract:
+              activeLoan.parentContract.copyWith(seasonsRemaining: remaining),
+          clearActiveLoan: true,
+          clearPendingEvent: true,
+          clearTransferRequest: true,
+          clearTransferRequestTrustPenaltySeason: true);
+    }
+    if (acceptedLoan != null) {
+      final valid = loanOffers(withHistory, definition: world).any((offer) =>
+          offer.clubId == acceptedLoan.clubId &&
+          offer.tacticalFit == acceptedLoan.tacticalFit &&
+          offer.promisedRole == acceptedLoan.promisedRole);
+      if (!valid) throw StateError('That loan is no longer available.');
+      final host =
+          world.clubs.firstWhere((club) => club.id == acceptedLoan.clubId);
+      final parentContract = snapshot.contract
+          .copyWith(seasonsRemaining: snapshot.contract.seasonsRemaining - 1);
+      return withHistory.copyWith(
+          revision: snapshot.revision + 1,
+          updatedAt: updatedAt.toUtc(),
+          season: snapshot.season + 1,
+          week: 1,
+          clubId: host.id,
+          clubName: host.name,
+          points: 0,
+          player: snapshot.player.copyWith(
+              age: snapshot.player.age + 1,
+              fitness: (snapshot.player.fitness + 12).clamp(1, 100),
+              form: 55),
+          phase: CareerPhase.inSeason,
+          world: nextWorld,
+          seasonPerformance: const SeasonPerformance(),
+          contract: parentContract.copyWith(
+              clubId: host.id,
+              seasonsRemaining: 1,
+              promisedRole: acceptedLoan.promisedRole),
+          activeLoan: LoanState(
+              parentClubId: snapshot.clubId,
+              hostClubId: host.id,
+              parentContract: parentContract,
+              returnSeason: snapshot.season + 2),
+          clearPendingEvent: true,
+          clearTransferRequest: true,
+          clearTransferRequestTrustPenaltySeason: true);
     }
 
     final validOffers = contractOffers(withHistory, definition: world);
@@ -443,6 +642,7 @@ final class CareerEngine {
       world: nextWorld,
       seasonPerformance: const SeasonPerformance(),
       contract: contract,
+      clearPendingEvent: true,
       clearTransferRequest: true,
       clearTransferRequestTrustPenaltySeason: true,
     );
@@ -458,6 +658,12 @@ final class CareerEngine {
     if (!event.choices.any((candidate) => candidate.id == choice.id)) {
       throw ArgumentError('Choice does not belong to this event.');
     }
+    if (snapshot.pendingEventId != null && snapshot.pendingEventId != event.id)
+      throw StateError('Resolve the pending story first.');
+    if (!eligibleEventsForResolution(snapshot, event))
+      throw StateError('This story is not available.');
+    if (choice.moneyDelta < 0 && snapshot.player.money < -choice.moneyDelta)
+      throw StateError('There is not enough money for that choice.');
     final token = '${snapshot.season}:${snapshot.week}:${event.id}';
     if (snapshot.resolvedEventIds.contains(token)) {
       throw StateError('This event has already been resolved.');
@@ -473,7 +679,10 @@ final class CareerEngine {
           agent: snapshot.relationships.agent + choice.trustDelta + 1,
         ),
       CareerEventCategory.family => snapshot.relationships.copyWith(
-          family: snapshot.relationships.family + choice.wellnessDelta,
+          family: snapshot.relationships.family +
+              (snapshot.usesModernCareerRules
+                  ? choice.familyDelta
+                  : choice.wellnessDelta),
         ),
       CareerEventCategory.community => snapshot.relationships.copyWith(
           community: snapshot.relationships.community + choice.reputationDelta,
@@ -484,12 +693,97 @@ final class CareerEngine {
         choice.moneyDelta > 0 &&
         !snapshot.sponsorIds.contains(event.id);
     final appliedMoney = modifiers.applyPositiveMoney(choice.moneyDelta);
+    final modern = snapshot.usesModernCareerRules;
+    final nextContract = modern
+        ? snapshot.contract.copyWith(
+            weeklyWage:
+                (snapshot.contract.weeklyWage * choice.weeklyWagePercent / 100)
+                    .round()
+                    .clamp(0, 1 << 30),
+            appearanceBonus: (snapshot.contract.appearanceBonus +
+                    choice.appearanceBonusDelta)
+                .clamp(0, 1 << 30),
+            seasonsRemaining: (snapshot.contract.seasonsRemaining +
+                    choice.contractSeasonsDelta)
+                .clamp(1, 10),
+            promisedRole: choice.promisedRole)
+        : snapshot.contract;
+    final flags = <String, String>{...snapshot.storyFlags};
+    if (modern && event.id.startsWith('mentor-')) {
+      if (event.id == 'mentor-01-introduction') {
+        flags['mentor.stage'] = '1';
+        flags['mentor.path'] = choice.id == 'solo' ? 'solo' : 'shared';
+      } else if (event.id == 'mentor-02-pressure') {
+        flags['mentor.stage'] = '2';
+        flags['mentor.pressure'] = choice.id;
+      } else {
+        flags['mentor.stage'] = '3';
+        flags['mentor.outcome'] = switch (choice.id) {
+          'reconcile' => 'alliance',
+          'independent' => 'respect',
+          _ => 'rivalry'
+        };
+      }
+      flags['mentor.lastWeek'] =
+          '${(snapshot.season - 1) * 18 + snapshot.week}';
+    }
+    final outcome = choice.outcome?.forLocale('en') ??
+        '${choice.reputationDelta >= 0 ? '+' : ''}${choice.reputationDelta} reputation; ${choice.wellnessDelta >= 0 ? '+' : ''}${choice.wellnessDelta} wellness; '
+            '${appliedMoney >= 0 ? '+' : ''}£$appliedMoney'
+            '${nextContract.weeklyWage != snapshot.contract.weeklyWage || nextContract.appearanceBonus != snapshot.contract.appearanceBonus ? '; wage £${nextContract.weeklyWage}, appearance bonus £${nextContract.appearanceBonus}' : ''}'
+            '${modern && choice.familyDelta != 0 ? '; family ${choice.familyDelta >= 0 ? '+' : ''}${choice.familyDelta}' : ''}.';
     return snapshot.copyWith(
       revision: snapshot.revision + 1,
       updatedAt: updatedAt.toUtc(),
+      clearPendingEvent: true,
+      contract: nextContract,
+      storyFlags: flags,
+      decisionJournal: [
+        DecisionJournalEntry(
+            eventId: event.id,
+            choiceId: choice.id,
+            season: snapshot.season,
+            week: snapshot.week,
+            title: event.title.forLocale('en'),
+            choiceLabel: choice.label.forLocale('en'),
+            outcome: outcome,
+            effects: {
+              'money':
+                  (snapshot.player.money + appliedMoney).clamp(0, 1 << 52) -
+                      snapshot.player.money,
+              'reputation':
+                  (snapshot.player.reputation + choice.reputationDelta)
+                          .clamp(0, 100) -
+                      snapshot.player.reputation,
+              'wellness':
+                  (snapshot.wellness + choice.wellnessDelta).clamp(0, 100) -
+                      snapshot.wellness,
+              'trust': event.category == CareerEventCategory.manager
+                  ? (snapshot.player.managerTrust + choice.trustDelta)
+                          .clamp(1, 100) -
+                      snapshot.player.managerTrust
+                  : 0,
+              'fitness': modern
+                  ? (snapshot.player.fitness + choice.fitnessDelta)
+                          .clamp(1, 100) -
+                      snapshot.player.fitness
+                  : 0,
+              'family': relationships.family - snapshot.relationships.family,
+              'teammates':
+                  relationships.teammates - snapshot.relationships.teammates,
+              'weeklyWage':
+                  nextContract.weeklyWage - snapshot.contract.weeklyWage,
+              'appearanceBonus': nextContract.appearanceBonus -
+                  snapshot.contract.appearanceBonus
+            }),
+        ...snapshot.decisionJournal
+      ].take(40).toList(growable: false),
       wellness: (snapshot.wellness + choice.wellnessDelta).clamp(0, 100),
       relationships: relationships,
       player: snapshot.player.copyWith(
+        fitness: modern
+            ? (snapshot.player.fitness + choice.fitnessDelta).clamp(1, 100)
+            : snapshot.player.fitness,
         managerTrust: event.category == CareerEventCategory.manager
             ? (snapshot.player.managerTrust + choice.trustDelta).clamp(1, 100)
             : snapshot.player.managerTrust,
@@ -543,6 +837,9 @@ final class CareerEngine {
       }
     }
     bool available(CareerEventDefinition event) {
+      if (event.id.startsWith('mentor-'))
+        return eligibleEventsForResolution(snapshot, event);
+
       if (snapshot.resolvedEventIds.contains(
         '${snapshot.season}:${snapshot.week}:${event.id}',
       )) {
@@ -555,7 +852,13 @@ final class CareerEngine {
           snapshot.player.reputation >= 35 && snapshot.sponsorContracts.isEmpty,
         CareerEventCategory.press => snapshot.player.reputation >= 20,
         CareerEventCategory.community => snapshot.player.reputation >= 15,
-        CareerEventCategory.contract => snapshot.week >= 10,
+        CareerEventCategory.contract => snapshot.week >= 10 &&
+            snapshot.activeLoan == null &&
+            (!snapshot.usesModernCareerRules ||
+                event.id != 'career-contract-01' ||
+                !snapshot.resolvedEventIds.any((token) =>
+                    token.startsWith('${snapshot.season}:') &&
+                    token.endsWith(':${event.id}'))),
         CareerEventCategory.wellness => snapshot.player.fitness <= 78,
         CareerEventCategory.agent =>
           snapshot.activeAgentId != 'agent-independent',
@@ -564,6 +867,27 @@ final class CareerEngine {
     }
 
     return List.unmodifiable(catalog.careerEvents.where(available));
+  }
+
+  bool eligibleEventsForResolution(
+      CareerSnapshot snapshot, CareerEventDefinition event) {
+    if (!event.id.startsWith('mentor-')) return true;
+    if (!snapshot.usesModernCareerRules ||
+        snapshot.phase != CareerPhase.inSeason) return false;
+    final stage = int.tryParse(snapshot.storyFlags['mentor.stage'] ?? '0') ?? 0;
+    final absoluteWeek = (snapshot.season - 1) * 18 + snapshot.week;
+    final last =
+        int.tryParse(snapshot.storyFlags['mentor.lastWeek'] ?? '-10') ?? -10;
+    if (absoluteWeek - last < 3) return false;
+    return switch (event.id) {
+      'mentor-01-introduction' => stage == 0 && snapshot.week >= 3,
+      'mentor-02-pressure' => stage == 1,
+      'mentor-03-shared' =>
+        stage == 2 && snapshot.storyFlags['mentor.path'] == 'shared',
+      'mentor-03-solo' =>
+        stage == 2 && snapshot.storyFlags['mentor.path'] == 'solo',
+      _ => false
+    };
   }
 
   CareerSnapshot purchaseLifestyleItem({
@@ -712,32 +1036,32 @@ final class CareerEngine {
       cycleAppearances: 0,
     );
     if (world.nationalTeams.length != 48) {
-      return snapshot.copyWith(
+      return updateCareerGoal(snapshot.copyWith(
         revision: snapshot.revision + 1,
         updatedAt: updatedAt.toUtc(),
         nationalTeam: nationalTeam,
-      );
+      ));
     }
     if (accept) {
-      return snapshot.copyWith(
+      return updateCareerGoal(snapshot.copyWith(
         revision: snapshot.revision + 1,
         updatedAt: updatedAt.toUtc(),
         phase: CareerPhase.internationalTournament,
         nationalTeam: nationalTeam,
-      );
+      ));
     }
     final completedWorld = _worldSimulator.completeNationalTournament(
       snapshot: snapshot.copyWith(nationalTeam: nationalTeam),
       definition: world,
       playerFinishOverride: 'declinedCallup',
     );
-    return snapshot.copyWith(
+    return updateCareerGoal(snapshot.copyWith(
       revision: snapshot.revision + 1,
       updatedAt: updatedAt.toUtc(),
       phase: CareerPhase.offseason,
       nationalTeam: nationalTeam,
       world: completedWorld,
-    );
+    ));
   }
 
   List<String> _playerTrophies(
@@ -784,10 +1108,8 @@ final class CareerEngine {
         agentFor(snapshot.activeAgentId).marketReachBonus;
   }
 
-  int _tacticalFit(CareerSnapshot snapshot, ClubDefinition club) => (55 +
-          ((club.attack + club.defense + snapshot.player.archetype.index * 7) %
-              31))
-      .clamp(1, 100);
+  int _tacticalFit(CareerSnapshot snapshot, ClubDefinition club) =>
+      calculateTacticalFit(snapshot, club);
 
   int _stableHash(String value) {
     var hash = 0x811c9dc5;

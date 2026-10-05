@@ -1,5 +1,6 @@
 import 'career_snapshot.dart';
 import 'career_types.dart';
+import 'enums.dart';
 
 bool canChooseRetirement(CareerSnapshot snapshot) =>
     !snapshot.retired &&
@@ -11,26 +12,62 @@ bool mustRetire(CareerSnapshot snapshot) =>
     snapshot.phase == CareerPhase.offseason &&
     (snapshot.season >= 20 || snapshot.player.age > 36);
 
-LegacyVerdict calculateLegacyVerdict(CareerSnapshot snapshot) {
+Map<String, num> legacyScoreContributions(CareerSnapshot snapshot) {
   final player = snapshot.player;
-  final trophies = snapshot.seasonHistory.fold<int>(
-    0,
-    (sum, season) => sum + season.trophies.length,
-  );
+  final trophies = snapshot.seasonHistory
+      .fold<int>(0, (sum, season) => sum + season.trophies.length);
   final averageRating = snapshot.seasonHistory.isEmpty
       ? 0.0
-      : snapshot.seasonHistory.fold<double>(
-            0,
-            (sum, season) => sum + season.averageRating,
-          ) /
+      : snapshot.seasonHistory
+              .fold<double>(0, (sum, season) => sum + season.averageRating) /
           snapshot.seasonHistory.length;
-  final score = (player.appearances * 4 +
-          player.goals * 12 +
-          player.assists * 8 +
-          trophies * 180 +
-          player.reputation * 9 +
-          player.overall * 5 +
-          averageRating * 75)
+  final role = snapshot.roleStats;
+  final weights = snapshot.usesModernCareerRules
+      ? switch (player.position) {
+          PositionFamily.striker => (12, 8, role.playerOfMatchAwards * 15),
+          PositionFamily.winger => (
+              8,
+              12,
+              role.successfulDribbles * .4 +
+                  role.chancesCreated * .5 +
+                  role.playerOfMatchAwards * 15
+            ),
+          PositionFamily.midfielder => (
+              5,
+              12,
+              role.keyPasses * .5 +
+                  role.chancesCreated * .75 +
+                  role.playerOfMatchAwards * 15
+            ),
+          PositionFamily.defender => (
+              5,
+              6,
+              role.tackles * .25 +
+                  role.interceptions * .5 +
+                  role.cleanSheets * 4 +
+                  role.playerOfMatchAwards * 15
+            ),
+        }
+      : (12, 8, 0);
+  return {
+    'appearances': player.appearances * 4,
+    'goals': player.goals * weights.$1,
+    'assists': player.assists * weights.$2,
+    'trophies': trophies * 180,
+    'reputation': player.reputation * 9,
+    'overall': player.overall * 5,
+    'averageRating': averageRating * 75,
+    'roleContributions': weights.$3
+  };
+}
+
+LegacyVerdict calculateLegacyVerdict(CareerSnapshot snapshot) {
+  final player = snapshot.player;
+  final trophies = snapshot.seasonHistory
+      .fold<int>(0, (sum, season) => sum + season.trophies.length);
+  final score = legacyScoreContributions(snapshot)
+      .values
+      .fold<num>(0, (sum, value) => sum + value)
       .round();
   final tier = score >= 6000
       ? LegacyTier.immortal
@@ -56,6 +93,8 @@ LegacyVerdict calculateLegacyVerdict(CareerSnapshot snapshot) {
       '${player.appearances} senior appearances',
       '${player.goals} goals and ${player.assists} assists',
       '$trophies major trophies',
+      if (snapshot.usesModernCareerRules)
+        snapshot.roleStats.summary(player.position),
       '${player.reputation}/100 reputation',
     ],
   );

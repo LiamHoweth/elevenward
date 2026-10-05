@@ -14,11 +14,11 @@ on:
       build_name:
         description: Public semantic version
         required: true
-        default: 0.1.0
+        default: 1.1.0
       build_number:
         description: Monotonically increasing store build number
         required: true
-        default: '1'
+        default: '6'
 
 permissions:
   contents: read
@@ -29,6 +29,8 @@ concurrency:
 
 env:
   FLUTTER_VERSION: '3.47.2'
+  RELEASE_BUILD_NAME: ${{ inputs.build_name }}
+  RELEASE_BUILD_NUMBER: ${{ inputs.build_number }}
 
 jobs:
   android:
@@ -37,6 +39,8 @@ jobs:
     environment: elevenward-production
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release version
+        run: python3 tool/validate_release_version.py "$RELEASE_BUILD_NAME" "$RELEASE_BUILD_NUMBER"
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -69,6 +73,9 @@ jobs:
             printf 'storeFile=%s\n' "$key_path"
           } > android/key.properties
       - run: flutter pub get
+      - name: Resolve core test dependencies
+        working-directory: packages/elevenward_core
+        run: dart pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build signed Android App Bundle
@@ -79,10 +86,11 @@ jobs:
           CONTENT_KEY: ${{ secrets.ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64 }}
         run: >-
           flutter build appbundle --release
-          --build-name=${{ inputs.build_name }}
-          --build-number=${{ inputs.build_number }}
+          --build-name="$RELEASE_BUILD_NAME"
+          --build-number="$RELEASE_BUILD_NUMBER"
           --obfuscate
           --split-debug-info=build/symbols/android
+          --dart-define-from-file=config/marketing.json
           --dart-define=ELEVENWARD_API_BASE_URL="$API_URL"
           --dart-define=ELEVENWARD_GOOGLE_SERVER_CLIENT_ID="$GOOGLE_CLIENT"
           --dart-define=REVENUECAT_ANDROID_PUBLIC_KEY="$REVENUECAT_KEY"
@@ -100,9 +108,13 @@ jobs:
   ios:
     if: inputs.platform == 'both' || inputs.platform == 'ios'
     runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     environment: elevenward-production
     steps:
       - uses: actions/checkout@v4
+      - name: Validate release version
+        run: python3 tool/validate_release_version.py "$RELEASE_BUILD_NAME" "$RELEASE_BUILD_NUMBER"
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -142,17 +154,30 @@ jobs:
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           cp "$profile_path" "$HOME/Library/MobileDevice/Provisioning Profiles/elevenward.mobileprovision"
       - run: flutter pub get
+      - name: Resolve core test dependencies
+        working-directory: packages/elevenward_core
+        run: dart pub get
       - run: flutter analyze
       - run: flutter test
       - name: Build signed App Store IPA and symbols
+        env:
+          API_URL: ${{ secrets.ELEVENWARD_API_BASE_URL }}
+          GOOGLE_CLIENT: ${{ secrets.ELEVENWARD_GOOGLE_SERVER_CLIENT_ID }}
+          REVENUECAT_KEY: ${{ secrets.REVENUECAT_IOS_PUBLIC_KEY }}
+          CONTENT_KEY: ${{ secrets.ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64 }}
         run: >-
           flutter build ipa --release
-          --build-name=${{ inputs.build_name }}
-          --build-number=${{ inputs.build_number }}
+          --build-name="$RELEASE_BUILD_NAME"
+          --build-number="$RELEASE_BUILD_NUMBER"
           --export-options-plist=ios/ExportOptions.plist
           --obfuscate
           --split-debug-info=build/symbols/ios
           --dart-define-from-file=config/production.json
+          --dart-define-from-file=config/marketing.json
+          --dart-define=ELEVENWARD_API_BASE_URL="$API_URL"
+          --dart-define=ELEVENWARD_GOOGLE_SERVER_CLIENT_ID="$GOOGLE_CLIENT"
+          --dart-define=REVENUECAT_IOS_PUBLIC_KEY="$REVENUECAT_KEY"
+          --dart-define=ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64="$CONTENT_KEY"
       - uses: actions/upload-artifact@v4
         with:
           name: elevenward-ios-${{ inputs.build_name }}-${{ inputs.build_number }}

@@ -1,6 +1,7 @@
 import 'package:elevenward_core/elevenward_core.dart';
 import 'package:flutter/material.dart';
 
+import '../app_controller.dart';
 import '../l10n_context.dart';
 import '../league_presentation.dart';
 import '../theme.dart';
@@ -11,9 +12,13 @@ import '../widgets/identity_badge.dart';
 typedef _WorldRegion = FootballMapRegion;
 
 final class WorldScreen extends StatefulWidget {
-  const WorldScreen({super.key, required this.career, this.definition})
-    : initialLeagueId = null,
-      highlightClubId = null;
+  const WorldScreen({
+    super.key,
+    required this.career,
+    this.definition,
+    this.controller,
+  }) : initialLeagueId = null,
+       highlightClubId = null;
 
   const WorldScreen.league({
     super.key,
@@ -21,12 +26,14 @@ final class WorldScreen extends StatefulWidget {
     required this.initialLeagueId,
     this.definition,
     this.highlightClubId,
+    this.controller,
   });
 
   final CareerSnapshot career;
   final String? initialLeagueId;
   final String? highlightClubId;
   final WorldDefinition? definition;
+  final AppController? controller;
 
   @override
   State<WorldScreen> createState() => _WorldScreenState();
@@ -109,6 +116,15 @@ final class _WorldScreenState extends State<WorldScreen>
 
   @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    if (controller == null) return _buildWorld(context);
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => _buildWorld(context),
+    );
+  }
+
+  Widget _buildWorld(BuildContext context) {
     if (widget.initialLeagueId == null) return _buildTabbedWorld(context);
     return _buildLeagueView(context);
   }
@@ -145,6 +161,13 @@ final class _WorldScreenState extends State<WorldScreen>
               icon: const Icon(Icons.arrow_back_rounded),
             ),
             actions: [
+              if (widget.controller case final controller?)
+                _BookmarkButton(
+                  key: Key('favorite-league-${league.id}'),
+                  name: leagueDisplayName(league),
+                  selected: controller.favoriteLeagueIds.contains(league.id),
+                  onPressed: () => controller.toggleFavoriteLeague(league.id),
+                ),
               PopupMenuButton<String>(
                 tooltip: context.l10n.allCompetitions,
                 initialValue: _leagueId,
@@ -175,6 +198,17 @@ final class _WorldScreenState extends State<WorldScreen>
                   '${_definition.country(league.countryId).nameFor(locale)} · ${uiCopy(locale, league.division == DivisionLevel.first ? 'divisionOne' : 'divisionTwo')}',
                 ),
                 const SizedBox(height: 18),
+                if (widget.controller case final controller?
+                    when playerRank >= 0 &&
+                        clubsById[highlightedClubId] != null) ...[
+                  _FavoriteClubTile(
+                    key: Key('league-club-spotlight-$highlightedClubId'),
+                    club: clubsById[highlightedClubId]!,
+                    subtitle: uiCopy(locale, 'clubSpotlight'),
+                    controller: controller,
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 if (playerRank >= 0) ...[
                   _TableHeader(
                     label: highlightedClubId == widget.career.clubId
@@ -202,7 +236,10 @@ final class _WorldScreenState extends State<WorldScreen>
                 ),
                 if (playerLeagueFixtures.isNotEmpty) ...[
                   const SizedBox(height: 22),
-                  _TableHeader(label: uiCopy(locale, 'recentResults')),
+                  _TableHeader(
+                    label: uiCopy(locale, 'recentResults'),
+                    showColumns: false,
+                  ),
                   ...playerLeagueFixtures.map(
                     (fixture) => _FixtureTile(
                       key: Key('league-result-${fixture.id}'),
@@ -353,6 +390,7 @@ final class _WorldScreenState extends State<WorldScreen>
               PlayerIdentityBadge(
                 playerName: player.name,
                 avatarId: 'initials',
+                portraitId: player.portraitId,
                 size: 56,
               ),
               const SizedBox(width: 12),
@@ -521,6 +559,17 @@ final class _WorldScreenState extends State<WorldScreen>
           title: club.name,
           body:
               '${_definition.country(league.countryId).nameFor(locale)} · ${leagueDisplayName(league)}',
+          trailing: widget.controller == null
+              ? null
+              : _BookmarkButton(
+                  key: Key('favorite-club-${club.id}'),
+                  name: club.name,
+                  selected: widget.controller!.favoriteClubIds.contains(
+                    club.id,
+                  ),
+                  onPressed: () =>
+                      widget.controller!.toggleFavoriteClub(club.id),
+                ),
         ),
         BroadcastPanel(
           accent: ElevenwardColors.coral,
@@ -534,7 +583,7 @@ final class _WorldScreenState extends State<WorldScreen>
                   children: [
                     Text(
                       '#${ranking.rank} ${uiCopy(locale, 'inWorld')}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: ElevenwardColors.coral,
                         fontWeight: FontWeight.w900,
                       ),
@@ -549,6 +598,13 @@ final class _WorldScreenState extends State<WorldScreen>
               ),
             ],
           ),
+        ),
+        const SizedBox(height: 10),
+        OutlinedButton.icon(
+          key: const Key('world-club-open-league'),
+          onPressed: () => _openLeague(leagueId, highlightClubId: club.id),
+          icon: const Icon(Icons.table_chart_outlined),
+          label: Text(context.l10n.leagueTable),
         ),
         const SizedBox(height: 16),
         _WorldSectionHeader(uiCopy(locale, 'seasonRecord')),
@@ -715,7 +771,12 @@ final class _WorldScreenState extends State<WorldScreen>
 
   Widget _buildRankingsTab(BuildContext context) {
     final locale = contentLocale(context);
-    final term = _rankingSearch.text.trim().toLowerCase();
+    final term = _worldSearchText(_rankingSearch.text.trim());
+    final hasFilters =
+        term.isNotEmpty ||
+        _rankingRegion != null ||
+        _rankingCountryId != null ||
+        _rankingDivision != null;
     final countries =
         _definition.countries
             .where((country) => _playableCountryIds.contains(country.id))
@@ -745,8 +806,13 @@ final class _WorldScreenState extends State<WorldScreen>
             return false;
           }
           return term.isEmpty ||
-              entry.club.name.toLowerCase().contains(term) ||
-              country.nameFor(locale).toLowerCase().contains(term) ||
+              _worldSearchText(entry.club.name).contains(term) ||
+              _worldSearchText(entry.club.shortName).contains(term) ||
+              country.names.values.any(
+                (name) => _worldSearchText(name).contains(term),
+              ) ||
+              _worldSearchText(leagueDisplayName(entry.league))
+                  .contains(term) ||
               leagueMatchesSearch(entry.league, term);
         })
         .toList(growable: false);
@@ -792,9 +858,20 @@ final class _WorldScreenState extends State<WorldScreen>
                 key: const Key('world-ranking-search'),
                 controller: _rankingSearch,
                 onChanged: (_) => setState(() {}),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (_) =>
+                    FocusManager.instance.primaryFocus?.unfocus(),
                 decoration: InputDecoration(
                   labelText: uiCopy(locale, 'searchClubsLeaguesCountries'),
                   prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _rankingSearch.text.isEmpty
+                      ? null
+                      : IconButton(
+                          key: const Key('world-ranking-clear-search'),
+                          tooltip: _worldPolishCopy(locale, 'clearSearch'),
+                          onPressed: () => setState(_rankingSearch.clear),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -886,6 +963,21 @@ final class _WorldScreenState extends State<WorldScreen>
               _WorldSectionHeader(
                 '${entries.length} ${uiCopy(locale, 'clubs')}',
               ),
+              if (entries.isEmpty)
+                BroadcastPanel(
+                  key: const Key('world-ranking-empty'),
+                  child: Text(_worldPolishCopy(locale, 'rankingNoResults')),
+                ),
+              if (hasFilters) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  key: const Key('world-ranking-reset-filters'),
+                  onPressed: _resetRankingFilters,
+                  icon: const Icon(Icons.filter_alt_off_outlined),
+                  label: Text(_worldPolishCopy(locale, 'clearAllFilters')),
+                ),
+                const SizedBox(height: 8),
+              ],
             ],
           ),
         ),
@@ -914,13 +1006,24 @@ final class _WorldScreenState extends State<WorldScreen>
     );
   }
 
+  void _resetRankingFilters() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _rankingSearch.clear();
+      _rankingRegion = null;
+      _rankingCountryId = null;
+      _rankingDivision = null;
+    });
+  }
+
   void _showRankingInfo(BuildContext context) {
     final locale = contentLocale(context);
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
+          key: const Key('world-ranking-help-scroll'),
           padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -947,6 +1050,7 @@ final class _WorldScreenState extends State<WorldScreen>
           initialLeagueId: leagueId,
           highlightClubId: highlightClubId,
           definition: _definition,
+          controller: widget.controller,
         ),
       ),
     );
@@ -967,12 +1071,16 @@ final class _WorldScreenState extends State<WorldScreen>
               ),
               Text(
                 uiCopy(locale, 'worldMapBody'),
-                style: const TextStyle(
-                  color: ElevenwardColors.muted,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: ElevenwardColors.muted, fontSize: 11),
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                key: const Key('world-search-open'),
+                onPressed: () => _openExplorer(context, focusSearch: true),
+                icon: const Icon(Icons.search_rounded),
+                label: Text(_worldPolishCopy(locale, 'searchPrompt')),
+              ),
+              const SizedBox(height: 12),
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
@@ -1026,6 +1134,10 @@ final class _WorldScreenState extends State<WorldScreen>
                 icon: const Icon(Icons.travel_explore_rounded),
                 label: Text(uiCopy(locale, 'exploreLeagues')),
               ),
+              if (widget.controller != null) ...[
+                const SizedBox(height: 20),
+                _buildFavorites(context),
+              ],
               const SizedBox(height: 16),
               _WorldSectionHeader(uiCopy(locale, 'playableRegions')),
               Wrap(
@@ -1063,10 +1175,96 @@ final class _WorldScreenState extends State<WorldScreen>
     );
   }
 
+  Widget _buildFavorites(BuildContext context) {
+    final controller = widget.controller!;
+    final locale = contentLocale(context);
+    final clubs =
+        _definition.clubs
+            .where((club) => controller.favoriteClubIds.contains(club.id))
+            .where(
+              (club) => widget.career.world.leagueParticipants.values.any(
+                (participants) => participants.contains(club.id),
+              ),
+            )
+            .toList()
+          ..sort((left, right) => left.name.compareTo(right.name));
+    final leagues =
+        _definition.leagues
+            .where((league) => controller.favoriteLeagueIds.contains(league.id))
+            .where(
+              (league) =>
+                  widget
+                      .career
+                      .world
+                      .leagueParticipants[league.id]
+                      ?.isNotEmpty ??
+                  false,
+            )
+            .toList()
+          ..sort(
+            (left, right) =>
+                leagueDisplayName(left).compareTo(leagueDisplayName(right)),
+          );
+    return Column(
+      key: const Key('world-favorites'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _WorldSectionHeader(_worldPolishCopy(locale, 'favorites')),
+        if (clubs.isEmpty && leagues.isEmpty)
+          BroadcastPanel(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.bookmark_border_rounded,
+                  color: ElevenwardColors.muted,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(_worldPolishCopy(locale, 'favoritesEmpty')),
+                ),
+              ],
+            ),
+          ),
+        ...clubs.map((club) {
+          final leagueId = widget.career.world.leagueIdForClub(club.id);
+          final league = _definition.leagues.firstWhere(
+            (league) => league.id == leagueId,
+          );
+          return _FavoriteClubTile(
+            key: Key('world-favorite-club-${club.id}'),
+            club: club,
+            subtitle:
+                '${_definition.country(club.countryId).nameFor(locale)} · ${leagueDisplayName(league)}',
+            controller: controller,
+            onTap: () => _openLeague(leagueId, highlightClubId: club.id),
+          );
+        }),
+        ...leagues.map(
+          (league) => _ExplorerOption(
+            key: Key('world-favorite-league-${league.id}'),
+            icon: Icons.emoji_events_outlined,
+            color: ElevenwardColors.sky,
+            title: leagueDisplayName(league),
+            subtitle: _definition.country(league.countryId).nameFor(locale),
+            trailing: _BookmarkButton(
+              key: Key('favorite-league-${league.id}'),
+              name: leagueDisplayName(league),
+              selected: true,
+              onPressed: () => controller.toggleFavoriteLeague(league.id),
+            ),
+            onTap: () => _openLeague(league.id),
+          ),
+        ),
+      ],
+    );
+  }
+
   void _openExplorer(
     BuildContext context, {
     FootballMapRegion? initialRegion,
     String? initialCountryId,
+    bool focusSearch = false,
   }) {
     Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -1081,6 +1279,8 @@ final class _WorldScreenState extends State<WorldScreen>
               : _regionForCountry(_definition.country(initialCountryId)),
           initialCountryId: initialCountryId,
           definition: _definition,
+          controller: widget.controller,
+          focusSearch: focusSearch,
         ),
       ),
     );
@@ -1130,7 +1330,7 @@ final class _WorldSectionHeader extends StatelessWidget {
     padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
     child: Text(
       label.toUpperCase(),
-      style: const TextStyle(
+      style: TextStyle(
         color: ElevenwardColors.muted,
         fontSize: 11,
         fontWeight: FontWeight.w900,
@@ -1174,7 +1374,7 @@ final class _StatGrid extends StatelessWidget {
                       const SizedBox(height: 2),
                       Text(
                         stat.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                           color: ElevenwardColors.muted,
                           fontSize: 11,
                         ),
@@ -1213,10 +1413,7 @@ final class _InlineStats extends StatelessWidget {
               ),
               Text(
                 entry.label,
-                style: const TextStyle(
-                  color: ElevenwardColors.muted,
-                  fontSize: 10,
-                ),
+                style: TextStyle(color: ElevenwardColors.muted, fontSize: 10),
               ),
             ],
           ),
@@ -1257,10 +1454,7 @@ final class _SimpleInfoTile extends StatelessWidget {
               Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
               Text(
                 subtitle,
-                style: const TextStyle(
-                  color: ElevenwardColors.muted,
-                  fontSize: 11,
-                ),
+                style: TextStyle(color: ElevenwardColors.muted, fontSize: 11),
               ),
             ],
           ),
@@ -1377,12 +1571,14 @@ final class _RankingTile extends StatelessWidget {
     final locale = contentLocale(context);
     return Semantics(
       button: true,
+      excludeSemantics: true,
+      onTap: onTap,
       label:
           '${uiCopy(locale, 'rank')} ${entry.rank}, ${entry.club.name}, '
           '$countryName, ${leagueDisplayName(entry.league)}, '
-          '${entry.record.played} played, ${entry.record.won} won, '
-          '${entry.record.drawn} drawn, ${entry.record.lost} lost, '
-          '${entry.record.points} points, ${entry.worldRating.toStringAsFixed(1)}',
+          '${_worldPolishCopy(locale, 'rankingRecord').replaceAll('{played}', '${entry.record.played}').replaceAll('{won}', '${entry.record.won}').replaceAll('{drawn}', '${entry.record.drawn}').replaceAll('{lost}', '${entry.record.lost}')}, '
+          '${entry.record.points} ${uiCopy(locale, 'points')}, '
+          '${uiCopy(locale, 'worldRating')} ${entry.worldRating.toStringAsFixed(1)}',
       child: Padding(
         padding: const EdgeInsets.only(bottom: 7),
         child: Material(
@@ -1398,56 +1594,62 @@ final class _RankingTile extends StatelessWidget {
             ),
           ),
           clipBehavior: Clip.antiAlias,
-          child: ListTile(
-            leading: SizedBox(
-              width: 55,
-              child: Row(
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SizedBox(
-                    width: 24,
-                    child: Text(
-                      '${entry.rank}',
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _ClubMark(club: entry.club),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '${entry.rank}. ${entry.club.name}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            Text(
+                              '$countryName · ${leagueDisplayName(entry.league)}',
+                              style: TextStyle(color: ElevenwardColors.muted),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  _ClubMark(club: entry.club),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 5,
+                    children: [
+                      Text(
+                        'P${entry.record.played} W${entry.record.won} '
+                        'D${entry.record.drawn} L${entry.record.lost}',
+                      ),
+                      Text(
+                        '${entry.record.points} ${uiCopy(locale, 'pointsShort')} · '
+                        '${entry.record.goalDifference >= 0 ? '+' : ''}${entry.record.goalDifference} GD',
+                      ),
+                      Text(
+                        '${uiCopy(locale, 'worldRating')} ${entry.worldRating.toStringAsFixed(1)}',
+                        style: TextStyle(
+                          color: ElevenwardColors.sky,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            title: Text(
-              entry.club.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            subtitle: Text(
-              '$countryName · ${leagueDisplayName(entry.league)}\n'
-              'P${entry.record.played} W${entry.record.won} D${entry.record.drawn} L${entry.record.lost} · '
-              '${entry.record.points}PTS · ${entry.record.goalDifference >= 0 ? '+' : ''}${entry.record.goalDifference}GD',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            isThreeLine: true,
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  entry.worldRating.toStringAsFixed(1),
-                  style: const TextStyle(
-                    color: ElevenwardColors.sky,
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                Text(
-                  uiCopy(locale, 'ratingShort'),
-                  style: const TextStyle(
-                    color: ElevenwardColors.muted,
-                    fontSize: 9,
-                  ),
-                ),
-              ],
-            ),
-            onTap: onTap,
           ),
         ),
       ),
@@ -1467,6 +1669,8 @@ final class _WorldExplorerScreen extends StatefulWidget {
     this.initialRegion,
     this.initialCountryId,
     required this.definition,
+    this.controller,
+    this.focusSearch = false,
   });
 
   final CareerSnapshot career;
@@ -1477,6 +1681,8 @@ final class _WorldExplorerScreen extends StatefulWidget {
   final FootballMapRegion? initialRegion;
   final String? initialCountryId;
   final WorldDefinition definition;
+  final AppController? controller;
+  final bool focusSearch;
 
   @override
   State<_WorldExplorerScreen> createState() => _WorldExplorerScreenState();
@@ -1487,6 +1693,10 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
   late _WorldExplorerLevel _level;
   FootballMapRegion? _region;
   String? _countryId;
+  String? _spotlightClubId;
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _selectionScroll = ScrollController();
 
   @override
   void initState() {
@@ -1502,8 +1712,27 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
   }
 
   @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    _selectionScroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
+    if (controller == null) return _buildExplorer(context);
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => _buildExplorer(context),
+    );
+  }
+
+  Widget _buildExplorer(BuildContext context) {
     final locale = contentLocale(context);
+    // Scaffold removes the consumed keyboard inset from its body MediaQuery.
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     return PopScope<void>(
       canPop: _level == _WorldExplorerLevel.world,
       onPopInvokedWithResult: (didPop, _) {
@@ -1530,36 +1759,39 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
           top: false,
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final mapHeight = (constraints.maxWidth / 1.72).clamp(
-                190.0,
-                320.0,
-              );
+              final mapHeight = (constraints.maxWidth / 1.72)
+                  .clamp(110.0, 320.0)
+                  .clamp(0.0, constraints.maxHeight * .42);
               return Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-                    child: SizedBox(
-                      height: mapHeight,
-                      child: AccurateFootballWorldMap(
-                        definition: _definition,
-                        homeRegion: widget.homeRegion,
-                        homeCountryId: widget.homeCountryId,
-                        currentClubCountryId: widget.clubCountryId,
-                        playableCountryIds: widget.playableCountryIds,
-                        selectedRegion: _region,
-                        selectedCountryId: _countryId,
-                        onRegionSelected: _selectRegion,
-                        onCountrySelected: _selectCountry,
-                        onUnavailable: (name) => ScaffoldMessenger.of(context)
-                          ..hideCurrentSnackBar()
-                          ..showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                '$name · ${uiCopy(locale, 'noPlayableLeagues')}',
+                  Offstage(
+                    key: const Key('world-explorer-map-area'),
+                    offstage: keyboardVisible,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+                      child: SizedBox(
+                        height: mapHeight,
+                        child: AccurateFootballWorldMap(
+                          definition: _definition,
+                          homeRegion: widget.homeRegion,
+                          homeCountryId: widget.homeCountryId,
+                          currentClubCountryId: widget.clubCountryId,
+                          playableCountryIds: widget.playableCountryIds,
+                          selectedRegion: _region,
+                          selectedCountryId: _countryId,
+                          onRegionSelected: _selectRegion,
+                          onCountrySelected: _selectCountry,
+                          onUnavailable: (name) => ScaffoldMessenger.of(context)
+                            ..hideCurrentSnackBar()
+                            ..showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '$name · ${uiCopy(locale, 'noPlayableLeagues')}',
+                                ),
                               ),
                             ),
-                          ),
-                        onReset: _reset,
+                          onReset: _reset,
+                        ),
                       ),
                     ),
                   ),
@@ -1604,82 +1836,274 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
               .toList(growable: false);
     return ListView(
       key: const Key('world-explorer-options'),
+      controller: _selectionScroll,
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 30),
       children: [
-        _TableHeader(
-          label: switch (_level) {
+        TextField(
+          key: const Key('world-search-field'),
+          controller: _search,
+          focusNode: _searchFocus,
+          autofocus: widget.focusSearch,
+          textInputAction: TextInputAction.search,
+          decoration: InputDecoration(
+            labelText: _worldPolishCopy(locale, 'searchPrompt'),
+            prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: _search.text.isEmpty
+                ? null
+                : IconButton(
+                    key: const Key('world-search-clear'),
+                    tooltip: _worldPolishCopy(locale, 'clearSearch'),
+                    onPressed: () => setState(_search.clear),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+          ),
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) => _searchFocus.unfocus(),
+        ),
+        const SizedBox(height: 16),
+        if (_search.text.trim().isNotEmpty) ...[
+          ..._searchResults(context),
+        ] else ...[
+          if (_spotlightClubId case final clubId?) ...[
+            _searchClubSpotlight(context, _definition.club(clubId)),
+            const SizedBox(height: 16),
+          ],
+          _WorldSectionHeader(switch (_level) {
             _WorldExplorerLevel.world => uiCopy(locale, 'playableRegions'),
             _WorldExplorerLevel.region => uiCopy(locale, 'playableCountries'),
             _WorldExplorerLevel.country => uiCopy(locale, 'regionLeagues'),
-          },
-        ),
-        if (_level == _WorldExplorerLevel.world)
-          ...FootballMapRegion.values.map(
-            (region) => _ExplorerOption(
-              key: Key('world-region-${_regionKey(region)}'),
-              icon: region == widget.homeRegion
-                  ? Icons.my_location_rounded
-                  : Icons.public_rounded,
-              color: region == widget.homeRegion
-                  ? ElevenwardColors.grass
-                  : ElevenwardColors.sky,
-              title: _regionName(locale, region),
-              subtitle: uiCopy(locale, 'chooseCountry'),
-              onTap: () => _selectRegion(region),
+          }),
+          if (_level == _WorldExplorerLevel.world)
+            ...FootballMapRegion.values.map(
+              (region) => _ExplorerOption(
+                key: Key('world-region-${_regionKey(region)}'),
+                icon: region == widget.homeRegion
+                    ? Icons.my_location_rounded
+                    : Icons.public_rounded,
+                color: region == widget.homeRegion
+                    ? ElevenwardColors.grass
+                    : ElevenwardColors.sky,
+                title: _regionName(locale, region),
+                subtitle: uiCopy(locale, 'chooseCountry'),
+                onTap: () => _selectRegion(region),
+              ),
             ),
-          ),
-        if (_level == _WorldExplorerLevel.region)
-          ...countries.map(
-            (country) => _ExplorerOption(
-              key: Key('world-country-${country.id}'),
-              icon: country.id == widget.homeCountryId
-                  ? Icons.home_rounded
-                  : country.id == widget.clubCountryId
-                  ? Icons.shield_rounded
-                  : Icons.flag_outlined,
-              color: country.id == widget.homeCountryId
-                  ? ElevenwardColors.grass
-                  : country.id == widget.clubCountryId
-                  ? ElevenwardColors.coral
-                  : widget.playableCountryIds.contains(country.id)
-                  ? ElevenwardColors.sky
-                  : ElevenwardColors.amber,
-              title: country.nameFor(locale),
-              subtitle: widget.playableCountryIds.contains(country.id)
-                  ? '${_definition.leagues.where((league) => league.countryId == country.id).length} ${uiCopy(locale, 'leagues')}'
-                  : context.l10n.nationalTeam,
-              onTap: () => _selectCountry(country.id),
+          if (_level == _WorldExplorerLevel.region)
+            ...countries.map(
+              (country) => _ExplorerOption(
+                key: Key('world-country-${country.id}'),
+                icon: country.id == widget.homeCountryId
+                    ? Icons.home_rounded
+                    : country.id == widget.clubCountryId
+                    ? Icons.shield_rounded
+                    : Icons.flag_outlined,
+                color: country.id == widget.homeCountryId
+                    ? ElevenwardColors.grass
+                    : country.id == widget.clubCountryId
+                    ? ElevenwardColors.coral
+                    : widget.playableCountryIds.contains(country.id)
+                    ? ElevenwardColors.sky
+                    : ElevenwardColors.amber,
+                title: country.nameFor(locale),
+                subtitle: widget.playableCountryIds.contains(country.id)
+                    ? '${_definition.leagues.where((league) => league.countryId == country.id).length} ${uiCopy(locale, 'leagues')}'
+                    : context.l10n.nationalTeam,
+                onTap: () => _selectCountry(country.id),
+              ),
             ),
-          ),
-        if (_level == _WorldExplorerLevel.country) ...[
-          ...leagues.map(
-            (league) => _ExplorerOption(
-              key: Key('country-league-${league.id}'),
-              icon: Icons.emoji_events_outlined,
-              color: ElevenwardColors.sky,
-              title: leagueDisplayName(league),
-              subtitle: '${league.clubIds.length} ${uiCopy(locale, 'clubs')}',
-              onTap: () => Navigator.of(context).push<void>(
-                MaterialPageRoute(
-                  builder: (_) => WorldScreen.league(
-                    career: widget.career,
-                    initialLeagueId: league.id,
-                    definition: _definition,
+          if (_level == _WorldExplorerLevel.country) ...[
+            ...leagues.map(
+              (league) => _ExplorerOption(
+                key: Key('country-league-${league.id}'),
+                icon: Icons.emoji_events_outlined,
+                color: ElevenwardColors.sky,
+                title: leagueDisplayName(league),
+                subtitle: '${league.clubIds.length} ${uiCopy(locale, 'clubs')}',
+                trailing: widget.controller == null
+                    ? null
+                    : _BookmarkButton(
+                        key: Key('favorite-league-${league.id}'),
+                        name: leagueDisplayName(league),
+                        selected: widget.controller!.favoriteLeagueIds.contains(
+                          league.id,
+                        ),
+                        onPressed: () =>
+                            widget.controller!.toggleFavoriteLeague(league.id),
+                      ),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => WorldScreen.league(
+                      career: widget.career,
+                      initialLeagueId: league.id,
+                      definition: _definition,
+                      controller: widget.controller,
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-          if (leagues.isNotEmpty) ...[
+            if (leagues.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              _WorldSectionHeader(uiCopy(locale, 'countryCups')),
+              _countryCupCard(context),
+            ],
             const SizedBox(height: 10),
-            _TableHeader(label: uiCopy(locale, 'countryCups')),
-            _countryCupCard(context),
+            _nationalTeamCard(context),
           ],
-          const SizedBox(height: 10),
-          _nationalTeamCard(context),
         ],
       ],
     );
+  }
+
+  List<Widget> _searchResults(BuildContext context) {
+    final locale = contentLocale(context);
+    final query = _worldSearchText(_search.text.trim());
+    final participantIds = {
+      for (final participants in widget.career.world.leagueParticipants.values)
+        ...participants,
+    };
+    final countries =
+        _definition.countries
+            .where(
+              (country) =>
+                  country.names.values.any(
+                    (name) => _worldSearchText(name).contains(query),
+                  ) ||
+                  country.id.replaceAll('-', ' ').contains(query),
+            )
+            .toList()
+          ..sort(
+            (left, right) =>
+                left.nameFor(locale).compareTo(right.nameFor(locale)),
+          );
+    final clubs =
+        _definition.clubs
+            .where(
+              (club) =>
+                  _worldSearchText(club.name).contains(query) ||
+                  _worldSearchText(club.shortName).contains(query),
+            )
+            .where((club) => participantIds.contains(club.id))
+            .toList()
+          ..sort((left, right) => left.name.compareTo(right.name));
+    if (countries.isEmpty && clubs.isEmpty) {
+      return [
+        BroadcastPanel(
+          key: const Key('world-search-empty'),
+          child: Text(_worldPolishCopy(locale, 'noResults')),
+        ),
+      ];
+    }
+    return [
+      if (countries.isNotEmpty) ...[
+        _WorldSectionHeader(uiCopy(locale, 'countries')),
+        ...countries.map(
+          (country) => _ExplorerOption(
+            key: Key('world-search-country-${country.id}'),
+            icon: Icons.flag_outlined,
+            color: ElevenwardColors.sky,
+            title: country.nameFor(locale),
+            subtitle: widget.playableCountryIds.contains(country.id)
+                ? _worldPolishCopy(locale, 'showLeagues')
+                : context.l10n.nationalTeam,
+            onTap: () => _selectSearchCountry(country.id),
+          ),
+        ),
+      ],
+      if (clubs.isNotEmpty) ...[
+        _WorldSectionHeader(uiCopy(locale, 'clubs')),
+        ...clubs
+            .take(30)
+            .map(
+              (club) => _ExplorerOption(
+                key: Key('world-search-club-${club.id}'),
+                icon: Icons.shield_outlined,
+                color: ElevenwardColors.coral,
+                title: club.name,
+                subtitle: _definition.country(club.countryId).nameFor(locale),
+                onTap: () =>
+                    _selectSearchCountry(club.countryId, clubId: club.id),
+              ),
+            ),
+        if (clubs.length > 30)
+          Padding(
+            padding: const EdgeInsets.all(8),
+            child: Text(_worldPolishCopy(locale, 'refineSearch')),
+          ),
+      ],
+    ];
+  }
+
+  Widget _searchClubSpotlight(BuildContext context, ClubDefinition club) {
+    final locale = contentLocale(context);
+    final leagueId = widget.career.world.leagueIdForClub(club.id);
+    final league = _definition.leagues.firstWhere(
+      (item) => item.id == leagueId,
+    );
+    return BroadcastPanel(
+      key: Key('world-search-spotlight-${club.id}'),
+      accent: ElevenwardColors.coral,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _ClubMark(club: club, size: 40),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      club.name,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    Text(leagueDisplayName(league)),
+                  ],
+                ),
+              ),
+              if (widget.controller case final controller?)
+                _BookmarkButton(
+                  key: Key('favorite-club-${club.id}'),
+                  name: club.name,
+                  selected: controller.favoriteClubIds.contains(club.id),
+                  onPressed: () => controller.toggleFavoriteClub(club.id),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            key: Key('world-search-open-league-${club.id}'),
+            icon: const Icon(Icons.emoji_events_outlined),
+            label: Text(_worldPolishCopy(locale, 'openLeague')),
+            onPressed: () => Navigator.of(context).push<void>(
+              MaterialPageRoute(
+                builder: (_) => WorldScreen.league(
+                  career: widget.career,
+                  initialLeagueId: league.id,
+                  definition: _definition,
+                  highlightClubId: club.id,
+                  controller: widget.controller,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _selectSearchCountry(String countryId, {String? clubId}) {
+    _searchFocus.unfocus();
+    setState(() {
+      _search.clear();
+      _spotlightClubId = clubId;
+      _region = _regionForCountry(_definition.country(countryId));
+      _countryId = countryId;
+      _level = _WorldExplorerLevel.country;
+    });
+    if (_selectionScroll.hasClients) _selectionScroll.jumpTo(0);
   }
 
   Widget _countryCupCard(BuildContext context) {
@@ -1708,10 +2132,14 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
     final qualification = widget.career.world.nationalQualification;
     final qualified = qualification?.qualified(country.id);
     final status = qualification == null
-        ? 'Next qualifying cycle begins in season ${((widget.career.season ~/ 4) + 1) * 4}.'
-        : qualified == true
-        ? 'Qualified for the season ${qualification.cycleSeason} championship.'
-        : 'Did not qualify for the season ${qualification.cycleSeason} championship.';
+        ? _worldPolishCopy(
+            locale,
+            'nextQualification',
+          ).replaceAll('{season}', '${((widget.career.season ~/ 4) + 1) * 4}')
+        : _worldPolishCopy(
+            locale,
+            qualified == true ? 'qualified' : 'notQualified',
+          ).replaceAll('{season}', '${qualification.cycleSeason}');
     return BroadcastPanel(
       accent: country.id == widget.homeCountryId
           ? ElevenwardColors.grass
@@ -1726,7 +2154,9 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
             style: const TextStyle(fontWeight: FontWeight.w900),
           ),
           const SizedBox(height: 5),
-          Text('$status National-team quality: ${team.quality}.'),
+          Text(
+            '$status ${_worldPolishCopy(locale, 'nationalQuality').replaceAll('{quality}', '${team.quality}')}',
+          ),
         ],
       ),
     );
@@ -1739,18 +2169,27 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
   ].join(' › ');
 
   void _selectRegion(FootballMapRegion region) => setState(() {
+    _search.clear();
+    _searchFocus.unfocus();
+    _spotlightClubId = null;
     _region = region;
     _countryId = null;
     _level = _WorldExplorerLevel.region;
   });
 
   void _selectCountry(String countryId) => setState(() {
+    _search.clear();
+    _searchFocus.unfocus();
+    _spotlightClubId = null;
     _region = _regionForCountry(_definition.country(countryId));
     _countryId = countryId;
     _level = _WorldExplorerLevel.country;
   });
 
   void _stepBack() => setState(() {
+    _spotlightClubId = null;
+    _search.clear();
+    _searchFocus.unfocus();
     if (_level == _WorldExplorerLevel.country) {
       _countryId = null;
       _level = _WorldExplorerLevel.region;
@@ -1762,10 +2201,279 @@ final class _WorldExplorerScreenState extends State<_WorldExplorerScreen> {
   });
 
   void _reset() => setState(() {
+    _spotlightClubId = null;
+    _search.clear();
+    _searchFocus.unfocus();
     _region = null;
     _countryId = null;
     _level = _WorldExplorerLevel.world;
   });
+}
+
+final class _FavoriteClubTile extends StatelessWidget {
+  const _FavoriteClubTile({
+    super.key,
+    required this.club,
+    required this.subtitle,
+    required this.controller,
+    this.onTap,
+  });
+
+  final ClubDefinition club;
+  final String subtitle;
+  final AppController controller;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => _WorldBrowseTile(
+    leading: _ClubMark(club: club, size: 34),
+    title: club.name,
+    subtitle: subtitle,
+    trailing: _BookmarkButton(
+      key: Key('favorite-club-${club.id}'),
+      name: club.name,
+      selected: controller.favoriteClubIds.contains(club.id),
+      onPressed: () => controller.toggleFavoriteClub(club.id),
+    ),
+    onTap: onTap,
+  );
+}
+
+final class _BookmarkButton extends StatefulWidget {
+  const _BookmarkButton({
+    super.key,
+    required this.name,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  final String name;
+  final bool selected;
+  final Future<void> Function() onPressed;
+
+  @override
+  State<_BookmarkButton> createState() => _BookmarkButtonState();
+}
+
+final class _BookmarkButtonState extends State<_BookmarkButton> {
+  bool _saving = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    return Semantics(
+      toggled: widget.selected,
+      child: IconButton(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        tooltip:
+            '${_worldPolishCopy(locale, _saving
+                ? 'saving'
+                : widget.selected
+                ? 'removeFavorite'
+                : 'addFavorite')} · ${widget.name}',
+        onPressed: _saving ? null : _toggle,
+        icon: _saving
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Icon(
+                widget.selected
+                    ? Icons.bookmark_rounded
+                    : Icons.bookmark_border_rounded,
+              ),
+      ),
+    );
+  }
+
+  Future<void> _toggle() async {
+    setState(() => _saving = true);
+    try {
+      await widget.onPressed();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                _worldPolishCopy(contentLocale(context), 'favoriteFailed'),
+              ),
+            ),
+          );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+}
+
+String _worldSearchText(String value) {
+  const letters = {
+    'à': 'a',
+    'á': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'ä': 'a',
+    'å': 'a',
+    'ç': 'c',
+    'è': 'e',
+    'é': 'e',
+    'ê': 'e',
+    'ë': 'e',
+    'ì': 'i',
+    'í': 'i',
+    'î': 'i',
+    'ï': 'i',
+    'ñ': 'n',
+    'ò': 'o',
+    'ó': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ö': 'o',
+    'œ': 'oe',
+    'ù': 'u',
+    'ú': 'u',
+    'û': 'u',
+    'ü': 'u',
+    'ý': 'y',
+    'ÿ': 'y',
+  };
+  return value
+      .toLowerCase()
+      .split('')
+      .map((letter) => letters[letter] ?? letter)
+      .join()
+      .replaceAll(RegExp(r'\s+'), ' ');
+}
+
+String _worldPolishCopy(String locale, String key) {
+  const copy = <String, Map<String, String>>{
+    'searchPrompt': {
+      'en': 'Search countries and clubs',
+      'es': 'Buscar países y clubes',
+      'pt-BR': 'Buscar países e clubes',
+      'fr': 'Rechercher pays et clubs',
+    },
+    'clearSearch': {
+      'en': 'Clear search',
+      'es': 'Borrar búsqueda',
+      'pt-BR': 'Limpar busca',
+      'fr': 'Effacer la recherche',
+    },
+    'noResults': {
+      'en': 'No countries or clubs found. Try another name.',
+      'es': 'No se encontraron países ni clubes. Prueba otro nombre.',
+      'pt-BR': 'Nenhum país ou clube encontrado. Tente outro nome.',
+      'fr': 'Aucun pays ou club trouvé. Essayez un autre nom.',
+    },
+    'rankingNoResults': {
+      'en': 'No clubs match this search and these filters. Clear the filters or try another name.',
+      'es': 'Ningún club coincide con esta búsqueda y estos filtros. Borra los filtros o prueba otro nombre.',
+      'pt-BR': 'Nenhum clube corresponde à busca e aos filtros. Limpe os filtros ou tente outro nome.',
+      'fr': 'Aucun club ne correspond à la recherche et aux filtres. Effacez les filtres ou essayez un autre nom.',
+    },
+    'clearAllFilters': {
+      'en': 'Clear all filters',
+      'es': 'Borrar todos los filtros',
+      'pt-BR': 'Limpar todos os filtros',
+      'fr': 'Effacer tous les filtres',
+    },
+    'rankingRecord': {
+      'en': '{played} played, {won} won, {drawn} drawn, {lost} lost',
+      'es':
+          '{played} jugados, {won} ganados, {drawn} empatados, {lost} perdidos',
+      'pt-BR': '{played} jogados, {won} vencidos, {drawn} empatados, {lost} perdidos',
+      'fr': '{played} joués, {won} gagnés, {drawn} nuls, {lost} perdus',
+    },
+    'standingSummary': {
+      'en': 'Rank {rank}, {club}, {played} played, goal difference {difference}, {points} points',
+      'es': 'Puesto {rank}, {club}, {played} jugados, diferencia de goles {difference}, {points} puntos',
+      'pt-BR': 'Posição {rank}, {club}, {played} jogados, saldo de gols {difference}, {points} pontos',
+      'fr': 'Rang {rank}, {club}, {played} joués, différence de buts {difference}, {points} points',
+    },
+    'goalDifferenceShort': {'en': 'GD', 'es': 'DG', 'pt-BR': 'SG', 'fr': 'DB'},
+    'refineSearch': {
+      'en': 'Showing the first 30 clubs. Enter more of the name to narrow your search.',
+      'es': 'Se muestran los primeros 30 clubes. Escribe más del nombre para precisar la búsqueda.',
+      'pt-BR': 'Mostrando os primeiros 30 clubes. Digite mais do nome para refinar a busca.',
+      'fr': 'Les 30 premiers clubs sont affichés. Précisez le nom pour affiner la recherche.',
+    },
+    'showLeagues': {
+      'en': 'Show country and leagues',
+      'es': 'Ver país y ligas',
+      'pt-BR': 'Ver país e ligas',
+      'fr': 'Voir le pays et les ligues',
+    },
+    'openLeague': {
+      'en': 'View club in league',
+      'es': 'Ver club en la liga',
+      'pt-BR': 'Ver clube na liga',
+      'fr': 'Voir le club dans sa ligue',
+    },
+    'favorites': {
+      'en': 'Favorites',
+      'es': 'Favoritos',
+      'pt-BR': 'Favoritos',
+      'fr': 'Favoris',
+    },
+    'favoritesEmpty': {
+      'en': 'Bookmark a club or league to find it here. Start with search or Explore leagues.',
+      'es': 'Marca un club o una liga para encontrarlo aquí. Empieza buscando o explorando ligas.',
+      'pt-BR': 'Marque um clube ou liga para encontrá-lo aqui. Comece buscando ou explorando ligas.',
+      'fr': 'Ajoutez un club ou une ligue aux favoris pour le retrouver ici. Recherchez ou explorez les ligues.',
+    },
+    'addFavorite': {
+      'en': 'Add to favorites',
+      'es': 'Añadir a favoritos',
+      'pt-BR': 'Adicionar aos favoritos',
+      'fr': 'Ajouter aux favoris',
+    },
+    'removeFavorite': {
+      'en': 'Remove from favorites',
+      'es': 'Quitar de favoritos',
+      'pt-BR': 'Remover dos favoritos',
+      'fr': 'Retirer des favoris',
+    },
+    'saving': {
+      'en': 'Saving favorite',
+      'es': 'Guardando favorito',
+      'pt-BR': 'Salvando favorito',
+      'fr': 'Enregistrement du favori',
+    },
+    'nextQualification': {
+      'en': 'The next qualifying cycle begins in season {season}.',
+      'es': 'El próximo ciclo de clasificación comienza en la temporada {season}.',
+      'pt-BR': 'O próximo ciclo de classificação começa na temporada {season}.',
+      'fr': 'Le prochain cycle de qualification commence à la saison {season}.',
+    },
+    'qualified': {
+      'en': 'Qualified for the season {season} championship.',
+      'es': 'Clasificado para el campeonato de la temporada {season}.',
+      'pt-BR': 'Classificado para o campeonato da temporada {season}.',
+      'fr': 'Qualifié pour le championnat de la saison {season}.',
+    },
+    'notQualified': {
+      'en': 'Did not qualify for the season {season} championship.',
+      'es': 'No se clasificó para el campeonato de la temporada {season}.',
+      'pt-BR': 'Não se classificou para o campeonato da temporada {season}.',
+      'fr': 'Non qualifié pour le championnat de la saison {season}.',
+    },
+    'nationalQuality': {
+      'en': 'National-team quality: {quality}.',
+      'es': 'Calidad de la selección: {quality}.',
+      'pt-BR': 'Qualidade da seleção: {quality}.',
+      'fr': 'Qualité de la sélection : {quality}.',
+    },
+    'favoriteFailed': {
+      'en': 'Could not save this favorite. Try again.',
+      'es': 'No se pudo guardar este favorito. Inténtalo de nuevo.',
+      'pt-BR': 'Não foi possível salvar este favorito. Tente novamente.',
+      'fr': 'Impossible d’enregistrer ce favori. Réessayez.',
+    },
+  };
+  return copy[key]?[locale] ?? copy[key]?['en'] ?? key;
 }
 
 final class _ExplorerOption extends StatelessWidget {
@@ -1776,6 +2484,7 @@ final class _ExplorerOption extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.trailing,
   });
 
   final IconData icon;
@@ -1783,6 +2492,32 @@ final class _ExplorerOption extends StatelessWidget {
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) => _WorldBrowseTile(
+    leading: RoleIconBadge(icon: icon, label: title, color: color),
+    title: title,
+    subtitle: subtitle,
+    trailing: trailing,
+    onTap: onTap,
+  );
+}
+
+final class _WorldBrowseTile extends StatelessWidget {
+  const _WorldBrowseTile({
+    required this.leading,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  final Widget leading;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -1791,16 +2526,68 @@ final class _ExplorerOption extends StatelessWidget {
       color: ElevenwardColors.panel,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(15),
-        side: const BorderSide(color: ElevenwardColors.line),
+        side: BorderSide(color: ElevenwardColors.line),
       ),
       clipBehavior: Clip.antiAlias,
-      child: ListTile(
-        minVerticalPadding: 10,
-        leading: RoleIconBadge(icon: icon, label: title, color: color),
-        title: Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-        subtitle: Text(subtitle),
-        trailing: const Icon(Icons.chevron_right_rounded),
-        onTap: onTap,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final textScale = MediaQuery.textScalerOf(context).scale(16) / 16;
+          final stacked = constraints.maxWidth / textScale < 240;
+          if (!stacked) {
+            return ListTile(
+              minVerticalPadding: 10,
+              leading: leading,
+              title: Text(
+                title,
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+              subtitle: Text(subtitle),
+              trailing:
+                  trailing ??
+                  (onTap == null
+                      ? null
+                      : const Icon(Icons.chevron_right_rounded)),
+              onTap: onTap,
+            );
+          }
+          return Semantics(
+            button: onTap != null,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        ExcludeSemantics(child: leading),
+                        if (trailing != null)
+                          trailing!
+                        else if (onTap != null)
+                          const ExcludeSemantics(
+                            child: Icon(Icons.chevron_right_rounded),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.bodyLarge
+                          ?.copyWith(fontWeight: FontWeight.w900),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     ),
   );
@@ -1908,7 +2695,7 @@ final class _NewsTile extends StatelessWidget {
             children: [
               Text(
                 'S${story.season} · W${story.week} · ${story.category.toUpperCase()}',
-                style: const TextStyle(
+                style: TextStyle(
                   color: ElevenwardColors.grass,
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
@@ -1923,7 +2710,7 @@ final class _NewsTile extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 story.body,
-                style: const TextStyle(
+                style: TextStyle(
                   color: ElevenwardColors.muted,
                   fontSize: 12,
                   height: 1.35,
@@ -1938,40 +2725,49 @@ final class _NewsTile extends StatelessWidget {
 }
 
 final class _TableHeader extends StatelessWidget {
-  const _TableHeader({required this.label});
+  const _TableHeader({required this.label, this.showColumns = true});
   final String label;
+  final bool showColumns;
 
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-    child: Row(
-      children: [
-        Expanded(
-          child: Text(
-            label.toUpperCase(),
-            style: const TextStyle(
-              color: ElevenwardColors.muted,
-              fontSize: 11,
-              fontWeight: FontWeight.w900,
-              letterSpacing: .8,
-            ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final title = Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            color: ElevenwardColors.muted,
+            fontSize: 11,
+            fontWeight: FontWeight.w900,
+            letterSpacing: .8,
           ),
-        ),
-        SizedBox(
-          width: 102,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              uiCopy(contentLocale(context), 'tableColumns'),
-              style: const TextStyle(
-                color: ElevenwardColors.muted,
-                fontSize: 11,
+        );
+        if (!showColumns) return title;
+        final columns = Text(
+          uiCopy(contentLocale(context), 'tableColumns'),
+          style: TextStyle(color: ElevenwardColors.muted, fontSize: 11),
+        );
+        if (MediaQuery.textScalerOf(context).scale(14) > 20) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [title, const SizedBox(height: 5), columns],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: title),
+            SizedBox(
+              width: 102,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: columns,
               ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     ),
   );
 }
@@ -1992,71 +2788,139 @@ final class _StandingTile extends StatelessWidget {
   final bool isPlayerClub;
 
   @override
-  Widget build(BuildContext context) => Container(
-    margin: const EdgeInsets.only(bottom: 5),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-    decoration: BoxDecoration(
-      color: isPlayerClub ? ElevenwardColors.grassDark : ElevenwardColors.panel,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: isPlayerClub ? ElevenwardColors.grass : ElevenwardColors.line,
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    final difference =
+        '${row.goalDifference >= 0 ? '+' : ''}${row.goalDifference}';
+    return Semantics(
+      label: _worldPolishCopy(locale, 'standingSummary')
+          .replaceAll('{rank}', '$rank')
+          .replaceAll('{club}', clubName)
+          .replaceAll('{played}', '${row.played}')
+          .replaceAll('{difference}', difference)
+          .replaceAll('{points}', '${row.points}'),
+      excludeSemantics: true,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: isPlayerClub
+              ? ElevenwardColors.grassDark
+              : ElevenwardColors.panel,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isPlayerClub
+                ? ElevenwardColors.grass
+                : ElevenwardColors.line,
+          ),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            if (MediaQuery.textScalerOf(context).scale(14) > 20) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (club != null) ...[
+                        _ClubMark(club: club!),
+                        const SizedBox(width: 9),
+                      ],
+                      Expanded(
+                        child: Text(
+                          '$rank. $clubName',
+                          style: TextStyle(
+                            fontWeight: isPlayerClub
+                                ? FontWeight.w900
+                                : FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 5,
+                    children: [
+                      Text('${uiCopy(locale, 'matches')} ${row.played}'),
+                      Text(
+                        '${_worldPolishCopy(locale, 'goalDifferenceShort')} $difference',
+                      ),
+                      Text(
+                        '${row.points} ${uiCopy(locale, 'pointsShort')}',
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            }
+            return Row(
+              children: [
+                SizedBox(
+                  width: 28,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '$rank',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+                if (club != null) ...[
+                  _ClubMark(club: club!),
+                  const SizedBox(width: 9),
+                ],
+                Expanded(
+                  child: Text(
+                    clubName,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: isPlayerClub
+                          ? FontWeight.w900
+                          : FontWeight.w600,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 28,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text('${row.played}'),
+                  ),
+                ),
+                SizedBox(
+                  width: 38,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${row.goalDifference >= 0 ? '+' : ''}${row.goalDifference}',
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 36,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      '${row.points}',
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
-    ),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 28,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '$rank',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
-        ),
-        if (club != null) ...[_ClubMark(club: club!), const SizedBox(width: 9)],
-        Expanded(
-          child: Text(
-            clubName,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: isPlayerClub ? FontWeight.w900 : FontWeight.w600,
-            ),
-          ),
-        ),
-        SizedBox(
-          width: 28,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text('${row.played}'),
-          ),
-        ),
-        SizedBox(
-          width: 38,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              '${row.goalDifference >= 0 ? '+' : ''}${row.goalDifference}',
-            ),
-          ),
-        ),
-        SizedBox(
-          width: 36,
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerRight,
-            child: Text(
-              '${row.points}',
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
+    );
+  }
 }
 
 final class _ClubMark extends StatelessWidget {
@@ -2130,7 +2994,7 @@ final class _CompetitionCard extends StatelessWidget {
       color: ElevenwardColors.panel,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: const BorderSide(color: ElevenwardColors.line),
+        side: BorderSide(color: ElevenwardColors.line),
       ),
       clipBehavior: Clip.antiAlias,
       child: ListTile(
@@ -2258,7 +3122,7 @@ final class _CompetitionDetailScreen extends StatelessWidget {
                     Text(
                       '${uiCopy(locale, competition.kind == CompetitionKind.internationalClub ? 'internationalQualification' : 'nationalQualification')} '
                       '${uiCopy(locale, 'groupTiebreaks')}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         color: ElevenwardColors.muted,
                         fontSize: 12,
                         height: 1.35,
@@ -2276,7 +3140,7 @@ final class _CompetitionDetailScreen extends StatelessWidget {
                   ],
                   Text(
                     uiCopy(locale, 'allFixtures').toUpperCase(),
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: ElevenwardColors.muted,
                       fontSize: 10,
                       fontWeight: FontWeight.w900,
@@ -2332,7 +3196,7 @@ final class _CompetitionBracket extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(4, 4, 4, 9),
           child: Text(
             uiCopy(locale, 'knockoutBracket').toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               color: ElevenwardColors.amber,
               fontSize: 10,
               fontWeight: FontWeight.w900,
@@ -2522,7 +3386,7 @@ final class _FixtureTile extends StatelessWidget {
           width: 34,
           child: Text(
             'W${fixture.matchweek}',
-            style: const TextStyle(color: ElevenwardColors.muted, fontSize: 10),
+            style: TextStyle(color: ElevenwardColors.muted, fontSize: 10),
           ),
         ),
         Expanded(
@@ -2552,7 +3416,7 @@ final class _FixtureTile extends StatelessWidget {
                       ? 'extraTimeShort'
                       : 'penaltiesShort',
                 ),
-                style: const TextStyle(
+                style: TextStyle(
                   color: ElevenwardColors.amber,
                   fontSize: 9,
                   fontWeight: FontWeight.w900,

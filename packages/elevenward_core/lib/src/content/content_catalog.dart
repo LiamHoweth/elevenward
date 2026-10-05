@@ -1,6 +1,7 @@
 import '../model/enums.dart';
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'career_story_content.dart';
 import 'content_models.dart';
 import 'off_pitch_scenarios.dart';
 
@@ -11,6 +12,19 @@ ContentCatalog buildLaunchContent() => ContentCatalog(
       lifestyleItems: _buildLifestyleItems(),
       world: buildLaunchWorld(),
     );
+
+ContentCatalog buildLatestContent() {
+  final previous = buildLaunchContent();
+  return ContentCatalog(
+      version: '2026.4.0',
+      world: previous.world,
+      matchSituations: previous.matchSituations,
+      lifestyleItems: previous.lifestyleItems,
+      careerEvents: [
+        ...previous.careerEvents.map(improveEventConsequences),
+        ...buildMentorArc()
+      ]);
+}
 
 List<String> validateContentCatalog(ContentCatalog catalog) {
   final errors = <String>[];

@@ -30,14 +30,6 @@ Future<void> main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-  SystemChrome.setSystemUIOverlayStyle(
-    const SystemUiOverlayStyle(
-      statusBarColor: Colors.transparent,
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: ElevenwardColors.ink,
-      systemNavigationBarIconBrightness: Brightness.light,
-    ),
-  );
   final careerStore = await CareerStore.open();
   final credentials = SecureCredentials();
   final api = ElevenwardApi(accessToken: credentials.readAccountToken);
@@ -63,24 +55,84 @@ Future<void> main() async {
     return false;
   };
   await controller.initialize();
+  final startupBrightness = switch (controller.displayMode) {
+    ThemeMode.dark => Brightness.dark,
+    ThemeMode.light => Brightness.light,
+    ThemeMode.system => PlatformDispatcher.instance.platformBrightness,
+  };
+  SystemChrome.setSystemUIOverlayStyle(_systemUiStyle(startupBrightness));
   runApp(ElevenwardApp(controller: controller));
 }
 
-class ElevenwardApp extends StatelessWidget {
+SystemUiOverlayStyle _systemUiStyle(Brightness brightness) {
+  final isDark = brightness == Brightness.dark;
+  return SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+    statusBarBrightness: brightness,
+    systemNavigationBarColor: isDark
+        ? ElevenwardPalette.dark.ink
+        : ElevenwardPalette.light.ink,
+    systemNavigationBarIconBrightness: isDark
+        ? Brightness.light
+        : Brightness.dark,
+  );
+}
+
+class ElevenwardApp extends StatefulWidget {
   const ElevenwardApp({super.key, this.careerStore, this.controller});
 
   final CareerStore? careerStore;
   final AppController? controller;
 
   @override
+  State<ElevenwardApp> createState() => _ElevenwardAppState();
+}
+
+class _ElevenwardAppState extends State<ElevenwardApp>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) widget.controller?.resumed();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final appController = controller;
+    final appController = widget.controller;
     return AnimatedBuilder(
       animation: appController ?? _NoopListenable.instance,
       builder: (context, _) => MaterialApp(
         title: 'Elevenward',
         debugShowCheckedModeBanner: false,
-        theme: buildElevenwardTheme(appController?.themeId ?? 'pitch'),
+        theme: buildElevenwardTheme(
+          appController?.themeId ?? 'graphite',
+          Brightness.light,
+        ),
+        darkTheme: buildElevenwardTheme(
+          appController?.themeId ?? 'graphite',
+          Brightness.dark,
+        ),
+        themeMode: appController?.displayMode ?? ThemeMode.dark,
+        builder: (context, child) {
+          final brightness = Theme.of(context).brightness;
+          ElevenwardColors.use(brightness);
+          return AnnotatedRegion<SystemUiOverlayStyle>(
+            value: _systemUiStyle(brightness),
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
         locale: appController?.locale,
         localizationsDelegates: const [
           AppLocalizations.delegate,
@@ -90,7 +142,7 @@ class ElevenwardApp extends StatelessWidget {
         ],
         supportedLocales: AppLocalizations.supportedLocales,
         home: appController == null
-            ? GameScreen(careerStore: careerStore)
+            ? GameScreen(careerStore: widget.careerStore)
             : switch (appController.stage) {
                 AppStage.booting => const Scaffold(
                   body: Center(child: CircularProgressIndicator()),

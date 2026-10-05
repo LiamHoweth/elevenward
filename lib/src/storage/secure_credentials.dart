@@ -12,6 +12,7 @@ final class SecureCredentials {
           );
 
   static const _accountTokenKey = 'elevenward.account.access_token';
+  static const _accountProfileKey = 'elevenward.account.profile';
   static const _installationTokenKey = 'elevenward.installation.token';
   static const _entitlementCacheKey = 'elevenward.entitlements.cache';
 
@@ -20,7 +21,14 @@ final class SecureCredentials {
   Future<String?> readAccountToken() => _storage.read(key: _accountTokenKey);
   Future<void> writeAccountToken(String token) =>
       _storage.write(key: _accountTokenKey, value: token);
-  Future<void> clearAccountToken() => _storage.delete(key: _accountTokenKey);
+  Future<String?> readAccountProfile() =>
+      _storage.read(key: _accountProfileKey);
+  Future<void> writeAccountProfile(String profile) =>
+      _storage.write(key: _accountProfileKey, value: profile);
+  Future<void> clearAccountToken() async {
+    await _storage.delete(key: _accountTokenKey);
+    await _storage.delete(key: _accountProfileKey);
+  }
 
   Future<String?> readInstallationToken() =>
       _storage.read(key: _installationTokenKey);

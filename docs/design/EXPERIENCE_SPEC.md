@@ -21,8 +21,10 @@ match transitions, events or recaps.
 
 1. First launch: choose a language, learn offline play and the weekly loop in
    three concise pages, then enter career slots.
-2. New career: identity/archetype, searchable nationality/club, then difficulty
-   and a complete review before committing the save.
+2. New career: choose identity and portrait, select a position before one of its
+   three play styles, choose the national team, then find a starting club with
+   search or league browsing. Explain difficulty and offer direct edits in the
+   complete review before committing the save.
 3. Matchweek: choose focus and load, view the matchup, make one spotlight
    decision, then read a compact result/development/income recap.
 4. Life: use Overview for national-team and agent decisions, Market for
@@ -42,8 +44,12 @@ More is a navigation hub rather than a second player dashboard. Its destinations
 are grouped as Career (Player, Legacy), Personalization (Appearance), Online
 (Account, Shop, Leaderboards), and App (Settings, Switch Career). Player,
 Legacy, Appearance, Settings, and Account are separate routes that update while
-open. Leaderboards remain one shared surface. Boost evidence is submission
-metadata, not a separate board or a public player label.
+open. Leaderboards remain one shared surface for signed-in accounts. Current
+careers publish after cloud sync; public names use a moderated account username
+or generated alias, never the career name. Boost evidence remains server-side
+validation data, not a separate board or a public player label.
+Sharing is an account setting carried across devices. Turning it off removes
+public entries; existing accounts must opt in once after the migration.
 
 Player is read-only except for transfer-request actions. Transfer requests use
 football terminology, can target the current or another league, and never move

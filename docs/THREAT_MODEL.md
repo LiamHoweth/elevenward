@@ -28,7 +28,7 @@ a production environment that has not yet been provisioned or inspected.
 | Cloud careers | API to isolated PostgreSQL schema | Account ownership on every query, parameterized SQL, revision checks, idempotency and conflict preservation |
 | Content releases | Staff portal/API to private immutable bucket to app | Staff authorization, validation, immutable version/checksum key, Ed25519 signature, same-origin HTTPS retrieval, size limit and exact career-version pinning |
 | Purchase state | Store/RevenueCat to API and local entitlement cache | Stable product mapping, webhook authentication/idempotency, refund/revocation handling, bounded 1.5×/2×/3× rewards and no valuable leaderboard prizes |
-| Leaderboards | Offline client to public aggregate board | Explicit opt-in, generated aliases, bounded aggregates, plausibility checks, partitioned rules and no prizes/free text |
+| Leaderboards | Account cloud sync to public aggregate board | Authenticated reads, account-level sharing control, prior opt-out preservation, generated alias or moderated public username, bounded scores, plausibility checks, partitioned rules and no prizes |
 | Analytics/error categories | Device to API | Separate explicit consent, allowlisted fields/values, bounded 30-day retry queue, no raw messages/stacks/tokens/paths |
 | Staff/release credentials | Protected CI and infrastructure environments | Least privilege, approval gates, rotation, audit history and no browser/client exposure |
 
@@ -78,7 +78,7 @@ restoration; they are never removed as a side effect of an entitlement change.
 - Sign-in sends provider proof to the isolated API and receives a scoped token;
   provider tokens are not analytics fields.
 - Cloud sync sends the chosen career snapshot only after sign-in.
-- Leaderboard submission is separate, opt-in and uses a generated alias.
+- A signed-in career can appear on the public board after cloud sync. Sharing is stored on the account across devices; switching it off removes entries. Existing accounts start private until they choose to enable sharing, and a prior explicit opt-out stays private. A moderated account username is optional and generated aliases remain the fallback. In-app reporting can hide a public profile on that device.
 - Analytics consent is separate from identity, cloud and leaderboard choices.
 - The public web-deletion flow uses account ID plus a short-lived one-time code;
   it never asks for an Apple/Google password or raw career database.

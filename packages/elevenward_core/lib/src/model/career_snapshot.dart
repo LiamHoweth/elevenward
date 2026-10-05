@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../world/world_generator.dart';
 import '../world/world_models.dart';
+import 'career_features.dart';
 import 'career_progress.dart';
 import 'career_types.dart';
 import 'enums.dart';
@@ -48,6 +49,13 @@ final class CareerSnapshot {
     this.developmentProgress = const {},
     this.boostIdsUsed = const [],
     this.newsFeed = const [],
+    this.roleStats = const RoleStats(),
+    this.matchJournal = const [],
+    this.decisionJournal = const [],
+    this.storyFlags = const {},
+    this.careerGoal,
+    this.activeLoan,
+    this.pendingEventId,
     this.transferRequest,
     this.transferRequestTrustPenaltySeason,
   });
@@ -58,7 +66,7 @@ final class CareerSnapshot {
     DateTime? updatedAt,
     String clubId = 'england-northstar-athletic',
     String clubName = 'Northstar Athletic',
-    String contentVersion = '2026.3.0',
+    String contentVersion = '2026.4.0',
     PlayerState? player,
     Difficulty difficulty = Difficulty.professional,
     WorldDefinition? worldDefinition,
@@ -181,6 +189,28 @@ final class CareerSnapshot {
             ),
           )
           .toList(growable: false),
+      roleStats: RoleStats.fromJson(
+          (migrated['roleStats'] as Map? ?? {}).cast<String, Object?>()),
+      matchJournal: (migrated['matchJournal'] as List? ?? [])
+          .map((entry) => MatchJournalEntry.fromJson(
+              (entry as Map).cast<String, Object?>()))
+          .take(40)
+          .toList(growable: false),
+      decisionJournal: (migrated['decisionJournal'] as List? ?? [])
+          .map((entry) => DecisionJournalEntry.fromJson(
+              (entry as Map).cast<String, Object?>()))
+          .take(40)
+          .toList(growable: false),
+      storyFlags: (migrated['storyFlags'] as Map? ?? {}).cast<String, String>(),
+      careerGoal: migrated['careerGoal'] is Map
+          ? CareerGoal.fromJson(
+              (migrated['careerGoal'] as Map).cast<String, Object?>())
+          : null,
+      activeLoan: migrated['activeLoan'] is Map
+          ? LoanState.fromJson(
+              (migrated['activeLoan'] as Map).cast<String, Object?>())
+          : null,
+      pendingEventId: migrated['pendingEventId'] as String?,
       transferRequest: migrated['transferRequest'] is Map
           ? TransferRequest.fromJson(
               (migrated['transferRequest'] as Map).cast<String, Object?>(),
@@ -196,14 +226,24 @@ final class CareerSnapshot {
     return CareerSnapshot.fromJson(jsonObject(decoded, 'snapshot'));
   }
 
-  static const currentSchemaVersion = 13;
-  static const currentRulesVersion = '2026.4';
+  static const currentSchemaVersion = 14;
+  static const currentRulesVersion = '2026.5';
 
   bool get usesExpandedLifeRules =>
       rulesVersion == '2026.2' ||
       rulesVersion == '2026.3' ||
+      rulesVersion == '2026.4' ||
       rulesVersion == currentRulesVersion;
 
+  bool get usesModernCareerRules => rulesVersion == '2026.5';
+
+  final RoleStats roleStats;
+  final List<MatchJournalEntry> matchJournal;
+  final List<DecisionJournalEntry> decisionJournal;
+  final Map<String, String> storyFlags;
+  final CareerGoal? careerGoal;
+  final LoanState? activeLoan;
+  final String? pendingEventId;
   final String careerId;
   final int schemaVersion;
   final String rulesVersion;
@@ -241,6 +281,16 @@ final class CareerSnapshot {
   final int? transferRequestTrustPenaltySeason;
 
   CareerSnapshot copyWith({
+    RoleStats? roleStats,
+    List<MatchJournalEntry>? matchJournal,
+    List<DecisionJournalEntry>? decisionJournal,
+    Map<String, String>? storyFlags,
+    CareerGoal? careerGoal,
+    LoanState? activeLoan,
+    String? pendingEventId,
+    bool clearPendingEvent = false,
+    bool clearCareerGoal = false,
+    bool clearActiveLoan = false,
     int? seed,
     int? revision,
     DateTime? updatedAt,
@@ -276,6 +326,14 @@ final class CareerSnapshot {
     bool clearTransferRequestTrustPenaltySeason = false,
   }) =>
       CareerSnapshot(
+        roleStats: roleStats ?? this.roleStats,
+        matchJournal: matchJournal ?? this.matchJournal,
+        decisionJournal: decisionJournal ?? this.decisionJournal,
+        storyFlags: storyFlags ?? this.storyFlags,
+        careerGoal: clearCareerGoal ? null : careerGoal ?? this.careerGoal,
+        activeLoan: clearActiveLoan ? null : activeLoan ?? this.activeLoan,
+        pendingEventId:
+            clearPendingEvent ? null : pendingEventId ?? this.pendingEventId,
         careerId: careerId,
         schemaVersion: schemaVersion,
         rulesVersion: rulesVersion,
@@ -322,6 +380,14 @@ final class CareerSnapshot {
   String encode() => jsonEncode(toJson());
 
   Map<String, Object?> toJson() => {
+        'roleStats': roleStats.toJson(),
+        'matchJournal': matchJournal.map((entry) => entry.toJson()).toList(),
+        'decisionJournal':
+            decisionJournal.map((entry) => entry.toJson()).toList(),
+        'storyFlags': storyFlags,
+        'careerGoal': careerGoal?.toJson(),
+        'activeLoan': activeLoan?.toJson(),
+        'pendingEventId': pendingEventId,
         'careerId': careerId,
         'schemaVersion': schemaVersion,
         'rulesVersion': rulesVersion,
@@ -466,6 +532,15 @@ final class CareerSnapshot {
     if (version < 13) {
       migrated.putIfAbsent('transferRequest', () => null);
       migrated.putIfAbsent('transferRequestTrustPenaltySeason', () => null);
+    }
+    if (version < 14) {
+      migrated.putIfAbsent('roleStats', () => <String, Object?>{});
+      migrated.putIfAbsent('matchJournal', () => <Object?>[]);
+      migrated.putIfAbsent('decisionJournal', () => <Object?>[]);
+      migrated.putIfAbsent('storyFlags', () => <String, String>{});
+      migrated.putIfAbsent('careerGoal', () => null);
+      migrated.putIfAbsent('activeLoan', () => null);
+      migrated.putIfAbsent('pendingEventId', () => null);
     }
     migrated['schemaVersion'] = currentSchemaVersion;
     return migrated;

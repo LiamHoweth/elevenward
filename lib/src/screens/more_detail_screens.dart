@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app_controller.dart';
+import '../career_engagement.dart';
+import '../feature_copy.dart';
 import '../l10n_context.dart';
 import '../league_presentation.dart';
 import '../storage/career_store.dart';
@@ -12,8 +14,16 @@ import '../theme.dart';
 import '../ui_copy.dart';
 import '../widgets/identity_badge.dart';
 import '../widgets/share_career_card.dart';
+import '../widgets/career_progress_panel.dart';
+import '../widgets/career_feature_panels.dart';
+import '../widgets/backup_status.dart';
 import '../widgets/transfer_request_sheet.dart';
+import '../widgets/recent_performance_strip.dart';
+import '../widgets/stat_explanation.dart';
 import 'shop_screen.dart';
+import 'how_to_play_screen.dart';
+import 'hall_of_fame_screen.dart';
+import 'support_screen.dart';
 
 final class PlayerScreen extends StatelessWidget {
   const PlayerScreen({super.key, required this.controller});
@@ -38,31 +48,9 @@ final class PlayerScreen extends StatelessWidget {
         children: [
           BroadcastPanel(
             accent: ElevenwardColors.grass,
-            child: Row(
-              children: [
-                PlayerIdentityBadge(
-                  playerName: career.player.name,
-                  avatarId: controller.avatarId,
-                  size: 70,
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        career.player.name,
-                        style: Theme.of(context).textTheme.headlineMedium,
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${localizedPosition(locale, career.player.position.name)} · ${localizedArchetype(locale, career.player.archetype)}',
-                      ),
-                    ],
-                  ),
-                ),
-                _OverallBadge(value: career.player.overall),
-              ],
+            child: _PlayerProfileHeader(
+              career: career,
+              avatarId: controller.avatarId,
             ),
           ),
           const SizedBox(height: 22),
@@ -89,20 +77,43 @@ final class PlayerScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           _Section(uiCopy(locale, 'attributes')),
-          _AttributeGrid(career: career),
+          _AttributeGrid(key: const Key('player-attributes'), career: career),
+          const SizedBox(height: 16),
+          CareerAmbitionPanel(career: career, controller: controller),
+          if (career.usesModernCareerRules) ...[
+            const SizedBox(height: 16),
+            CareerStylePanel(
+              career: career,
+              club: world.clubs.firstWhere((club) => club.id == career.clubId),
+            ),
+          ],
           const SizedBox(height: 22),
           _Section(uiCopy(locale, 'playerStatistics')),
           _MetricGrid(
+            career: career,
+            explanations: {
+              uiCopy(locale, 'form'): ExplainedStat.form,
+              uiCopy(locale, 'managerTrust'): ExplainedStat.managerTrust,
+            },
             metrics: [
-              (uiCopy(locale, 'form'), '${career.player.form}'),
-              (uiCopy(locale, 'fitness'), '${career.player.fitness}'),
-              (uiCopy(locale, 'reputationLong'), '${career.player.reputation}'),
-              (uiCopy(locale, 'managerTrust'), '${career.player.managerTrust}'),
+              (uiCopy(locale, 'form'), '${career.player.form}/100'),
+              (uiCopy(locale, 'fitness'), '${career.player.fitness}/100'),
+              (
+                uiCopy(locale, 'reputationLong'),
+                '${career.player.reputation}/100',
+              ),
+              (
+                uiCopy(locale, 'managerTrust'),
+                '${career.player.managerTrust}/100',
+              ),
             ],
           ),
           const SizedBox(height: 22),
+          RecentPerformanceStrip(career: career),
+          const SizedBox(height: 22),
           _Section(uiCopy(locale, 'currentSeason')),
           _MetricGrid(
+            key: const Key('player-season-metrics'),
             metrics: [
               (
                 uiCopy(locale, 'apps'),
@@ -115,12 +126,18 @@ final class PlayerScreen extends StatelessWidget {
               ),
               (
                 uiCopy(locale, 'rating'),
-                career.seasonPerformance.averageRating.toStringAsFixed(1),
+                career.seasonPerformance.ratedMatches == 0
+                    ? uiCopy(locale, 'unavailable')
+                    : career.seasonPerformance.averageRating.toStringAsFixed(1),
               ),
             ],
           ),
           const SizedBox(height: 22),
           _Section(uiCopy(locale, 'careerRecord')),
+          if (controller.showCareerTarget && !career.retired) ...[
+            CareerTargetPanel(career: career),
+            const SizedBox(height: 14),
+          ],
           _MetricGrid(
             metrics: [
               (uiCopy(locale, 'apps'), '${career.player.appearances}'),
@@ -165,6 +182,29 @@ final class PlayerScreen extends StatelessWidget {
           const SizedBox(height: 22),
           _Section(uiCopy(locale, 'careerMoves')),
           _TransferRequestCard(controller: controller, world: world),
+          const SizedBox(height: 16),
+          CareerRoleStatsPanel(
+            stats: career.roleStats,
+            position: career.player.position,
+          ),
+          const SizedBox(height: 16),
+          MentorStoryPanel(career: career),
+          if (career.activeLoan case final loan?) ...[
+            const SizedBox(height: 16),
+            BroadcastPanel(
+              child: Text(
+                formatFeatureCopy(locale, 'loanReturn', {
+                  'club':
+                      world.clubs
+                          .where((club) => club.id == loan.parentClubId)
+                          .firstOrNull
+                          ?.name ??
+                      loan.parentClubId,
+                  'season': loan.returnSeason,
+                }),
+              ),
+            ),
+          ],
         ],
       );
     },
@@ -256,20 +296,25 @@ final class _TransferRequestCard extends StatelessWidget {
   }
 
   Future<void> _edit(BuildContext context, CareerSnapshot career) async {
+    final generation = controller.activeCareerGeneration;
     final draft = await showTransferRequestFlow(
       context: context,
       career: career,
       world: world,
     );
-    if (draft == null) return;
+    if (draft == null || generation != controller.activeCareerGeneration) {
+      return;
+    }
     await controller.fileTransferRequest(
       targetLeagueId: draft.targetLeagueId,
       preferredClubId: draft.preferredClubId,
+      expectedGeneration: generation,
     );
   }
 
   Future<void> _cancel(BuildContext context) async {
     final locale = contentLocale(context);
+    final generation = controller.activeCareerGeneration;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -287,7 +332,9 @@ final class _TransferRequestCard extends StatelessWidget {
         ],
       ),
     );
-    if (confirmed == true) await controller.cancelTransferRequest();
+    if (confirmed == true && generation == controller.activeCareerGeneration) {
+      await controller.cancelTransferRequest(expectedGeneration: generation);
+    }
   }
 }
 
@@ -323,7 +370,7 @@ final class LegacyScreen extends StatelessWidget {
                     career.retired ? 'finalLegacy' : 'legacyProjection',
                   ).toUpperCase(),
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: ElevenwardColors.amber,
                     fontSize: 11,
                     fontWeight: FontWeight.w900,
@@ -338,7 +385,7 @@ final class LegacyScreen extends StatelessWidget {
                 const SizedBox(height: 6),
                 Text(
                   localizedLegacyTier(locale, verdict.tier),
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: ElevenwardColors.grass,
                     fontWeight: FontWeight.w900,
                   ),
@@ -371,6 +418,47 @@ final class LegacyScreen extends StatelessWidget {
               (uiCopy(locale, 'assists'), '${career.nationalTeam.assists}'),
             ],
           ),
+          const SizedBox(height: 16),
+          LegacyBreakdownPanel(career: career),
+          const SizedBox(height: 16),
+          CareerRoleStatsPanel(
+            stats: career.roleStats,
+            position: career.player.position,
+          ),
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            key: const Key('legacy-hall-of-fame'),
+            onPressed: () async {
+              if (career.retired) {
+                try {
+                  await controller.archiveCareer(career);
+                } on Object {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(uiCopy(locale, 'progressSaveFailed')),
+                      ),
+                    );
+                  }
+                  return;
+                }
+              }
+              if (context.mounted) {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => HallOfFameScreen(controller: controller),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.emoji_events_outlined),
+            label: Text(
+              featureCopy(
+                locale,
+                career.retired ? 'archiveCareer' : 'hallOfFame',
+              ),
+            ),
+          ),
           const SizedBox(height: 22),
           _Section(context.l10n.legacy),
           _CareerHonours(career: career),
@@ -394,7 +482,7 @@ final class LegacyScreen extends StatelessWidget {
 }
 
 final class _AttributeGrid extends StatelessWidget {
-  const _AttributeGrid({required this.career});
+  const _AttributeGrid({super.key, required this.career});
 
   final CareerSnapshot career;
 
@@ -403,7 +491,10 @@ final class _AttributeGrid extends StatelessWidget {
     final locale = contentLocale(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = (constraints.maxWidth - 8) / 2;
+        final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+        final width = largeText || constraints.maxWidth < 260
+            ? constraints.maxWidth
+            : (constraints.maxWidth - 8) / 2;
         return Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -424,40 +515,132 @@ final class _AttributeGrid extends StatelessWidget {
   }
 }
 
+final class _PlayerProfileHeader extends StatelessWidget {
+  const _PlayerProfileHeader({required this.career, required this.avatarId});
+
+  final CareerSnapshot career;
+  final String avatarId;
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = contentLocale(context);
+    final identity = PlayerIdentityBadge(
+      playerName: career.player.name,
+      avatarId: avatarId,
+      portraitId: career.player.portraitId,
+      size: 70,
+    );
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          career.player.name,
+          style: Theme.of(context).textTheme.headlineMedium,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          '${localizedPosition(locale, career.player.position.name)} · ${localizedArchetype(locale, career.player.archetype)}',
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+        if (largeText || constraints.maxWidth < 300) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  identity,
+                  const SizedBox(width: 16),
+                  Expanded(child: _OverallBadge(value: career.player.overall)),
+                ],
+              ),
+              const SizedBox(height: 14),
+              details,
+            ],
+          );
+        }
+        return Row(
+          children: [
+            identity,
+            const SizedBox(width: 16),
+            Expanded(child: details),
+            const SizedBox(width: 12),
+            _OverallBadge(value: career.player.overall),
+          ],
+        );
+      },
+    );
+  }
+}
+
 final class _OverallBadge extends StatelessWidget {
   const _OverallBadge({required this.value});
 
   final int value;
 
   @override
-  Widget build(BuildContext context) => Container(
-    width: 54,
-    height: 54,
-    alignment: Alignment.center,
-    decoration: const BoxDecoration(
-      color: ElevenwardColors.grassDark,
-      shape: BoxShape.circle,
-    ),
-    child: Text(
-      '$value',
-      style: const TextStyle(
-        color: ElevenwardColors.grass,
-        fontSize: 20,
-        fontWeight: FontWeight.w900,
+  Widget build(BuildContext context) {
+    // Scale the frame with its text so both digits retain their requested size.
+    final diameter = MediaQuery.textScalerOf(context).scale(54);
+    return Semantics(
+      key: const Key('player-overall-badge'),
+      label: uiCopy(contentLocale(context), 'overall'),
+      value: '$value',
+      excludeSemantics: true,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: diameter,
+            height: diameter,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: ElevenwardColors.grassDark,
+              shape: BoxShape.circle,
+            ),
+            child: Text(
+              '$value',
+              style: TextStyle(
+                color: ElevenwardColors.grass,
+                fontSize: 20,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            uiCopy(contentLocale(context), 'overall'),
+            textAlign: TextAlign.center,
+            style: TextStyle(color: ElevenwardColors.muted, fontSize: 11),
+          ),
+        ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 final class _MetricGrid extends StatelessWidget {
-  const _MetricGrid({required this.metrics});
+  const _MetricGrid({
+    super.key,
+    required this.metrics,
+    this.explanations = const {},
+    this.career,
+  });
 
   final List<(String, String)> metrics;
+  final Map<String, ExplainedStat> explanations;
+  final CareerSnapshot? career;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final width = (constraints.maxWidth - 8) / 2;
+      final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+      final width = largeText
+          ? constraints.maxWidth
+          : (constraints.maxWidth - 8) / 2;
       return Wrap(
         spacing: 8,
         runSpacing: 8,
@@ -465,7 +648,12 @@ final class _MetricGrid extends StatelessWidget {
             .map(
               (metric) => SizedBox(
                 width: width,
-                child: _MetricTile(label: metric.$1, value: metric.$2),
+                child: _MetricTile(
+                  label: metric.$1,
+                  value: metric.$2,
+                  explainedStat: explanations[metric.$1],
+                  career: career,
+                ),
               ),
             )
             .toList(growable: false),
@@ -475,37 +663,78 @@ final class _MetricGrid extends StatelessWidget {
 }
 
 final class _MetricTile extends StatelessWidget {
-  const _MetricTile({required this.label, required this.value});
+  const _MetricTile({
+    required this.label,
+    required this.value,
+    this.explainedStat,
+    this.career,
+  });
 
   final String label;
   final String value;
+  final ExplainedStat? explainedStat;
+  final CareerSnapshot? career;
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: 78),
-    padding: const EdgeInsets.all(13),
-    decoration: BoxDecoration(
-      color: ElevenwardColors.panel,
-      border: Border.all(color: ElevenwardColors.line),
-      borderRadius: BorderRadius.circular(ElevenwardRadii.control),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: ElevenwardColors.cream,
-            fontSize: 21,
-            fontWeight: FontWeight.w900,
+  Widget build(BuildContext context) {
+    final tile = Container(
+      constraints: const BoxConstraints(minHeight: 78),
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: ElevenwardColors.panel,
+        border: Border.all(color: ElevenwardColors.line),
+        borderRadius: BorderRadius.circular(ElevenwardRadii.control),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              color: ElevenwardColors.cream,
+              fontSize: 21,
+              fontWeight: FontWeight.w900,
+            ),
           ),
+          const SizedBox(height: 3),
+          Text.rich(
+            TextSpan(
+              text: label,
+              children: [
+                if (explainedStat != null)
+                  WidgetSpan(
+                    alignment: PlaceholderAlignment.middle,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 5),
+                      child: Icon(
+                        Icons.info_outline_rounded,
+                        size: 16,
+                        color: ElevenwardColors.muted,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+    if (explainedStat == null) return tile;
+    return Tooltip(
+      message: explainedStatHelpLabel(contentLocale(context), explainedStat!),
+      child: Semantics(
+        button: true,
+        child: InkWell(
+          key: Key('player-stat-help-${explainedStat!.name}'),
+          borderRadius: BorderRadius.circular(ElevenwardRadii.control),
+          onTap: () =>
+              showStatExplanation(context, explainedStat!, career: career),
+          child: tile,
         ),
-        const SizedBox(height: 3),
-        Text(label),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 final class AppearanceScreen extends StatelessWidget {
@@ -514,7 +743,7 @@ final class AppearanceScreen extends StatelessWidget {
   final AppController controller;
 
   static const _themeOptions = [
-    (id: 'pitch', label: 'cosmeticPitch'),
+    (id: 'graphite', label: 'cosmeticGraphite'),
     (id: 'ocean', label: 'cosmeticOcean'),
     (id: 'violet', label: 'cosmeticViolet'),
     (id: 'sunset', label: 'cosmeticSunset'),
@@ -555,6 +784,7 @@ final class AppearanceScreen extends StatelessWidget {
                 PlayerIdentityBadge(
                   playerName: career.player.name,
                   avatarId: controller.avatarId,
+                  portraitId: career.player.portraitId,
                   size: 64,
                 ),
                 const SizedBox(width: 14),
@@ -616,7 +846,7 @@ final class AppearanceScreen extends StatelessWidget {
             Text(
               controller.lastMessage!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: ElevenwardColors.amber),
+              style: TextStyle(color: ElevenwardColors.amber),
             ),
           ],
         ],
@@ -719,7 +949,7 @@ final class _CosmeticSection extends StatelessWidget {
                                     const SizedBox(height: 8),
                                     Text(
                                       uiCopy(locale, option.label),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         color: ElevenwardColors.cream,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -823,7 +1053,7 @@ Widget _cosmeticIcon(String kind, String value) {
 
 String _cosmeticLabel(String locale, String value) =>
     uiCopy(locale, switch (value) {
-      'pitch' => 'cosmeticPitch',
+      'pitch' || 'graphite' => 'cosmeticGraphite',
       'ocean' => 'cosmeticOcean',
       'violet' => 'cosmeticViolet',
       'sunset' => 'cosmeticSunset',
@@ -858,6 +1088,11 @@ final class SettingsScreen extends StatelessWidget {
         'fr' => 'Français',
         _ => uiCopy(locale, 'system'),
       };
+      final currentDisplayMode = switch (controller.displayMode) {
+        ThemeMode.dark => uiCopy(locale, 'displayDark'),
+        ThemeMode.light => uiCopy(locale, 'displayLight'),
+        ThemeMode.system => uiCopy(locale, 'displaySystem'),
+      };
       return _DetailPage(
         pageKey: const Key('more-settings-screen'),
         title: context.l10n.settings,
@@ -872,6 +1107,67 @@ final class SettingsScreen extends StatelessWidget {
                 subtitle: Text(currentLanguage),
                 trailing: const Icon(Icons.chevron_right_rounded),
                 onTap: () => _chooseLanguage(context),
+              ),
+              ListTile(
+                key: const Key('settings-display-mode'),
+                leading: const Icon(Icons.contrast_rounded),
+                title: Text(uiCopy(locale, 'displayMode')),
+                subtitle: Text(currentDisplayMode),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _chooseDisplayMode(context),
+              ),
+              ListTile(
+                key: const Key('settings-how-to-play'),
+                leading: const Icon(Icons.help_outline_rounded),
+                title: Text(uiCopy(locale, 'howToPlay')),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(builder: (_) => const HowToPlayScreen()),
+                ),
+              ),
+              ListTile(
+                key: const Key('settings-support'),
+                leading: const Icon(Icons.support_agent_outlined),
+                title: Text(featureCopy(locale, 'support')),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push<void>(
+                  MaterialPageRoute(
+                    builder: (_) => SupportScreen(controller: controller),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          _Section(uiCopy(locale, 'gameplayPreferences')),
+          _Card(
+            children: [
+              SwitchListTile.adaptive(
+                key: const Key('settings-quick-transitions'),
+                title: Text(uiCopy(locale, 'quickTransitions')),
+                subtitle: Text(uiCopy(locale, 'quickTransitionsBody')),
+                value: controller.quickTransitions,
+                onChanged: (value) => controller.changeGameplayPreference(
+                  'quickTransitions',
+                  value,
+                ),
+              ),
+              SwitchListTile.adaptive(
+                title: Text(uiCopy(locale, 'showCoachingTips')),
+                subtitle: Text(uiCopy(locale, 'showCoachingTipsBody')),
+                value: controller.showCoachingTips,
+                onChanged: (value) => controller.changeGameplayPreference(
+                  'showCoachingTips',
+                  value,
+                ),
+              ),
+              SwitchListTile.adaptive(
+                title: Text(uiCopy(locale, 'showCareerTarget')),
+                value: controller.showCareerTarget,
+                onChanged: (value) => controller.changeGameplayPreference(
+                  'showCareerTarget',
+                  value,
+                ),
               ),
             ],
           ),
@@ -895,7 +1191,7 @@ final class SettingsScreen extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(
+                Icon(
                   Icons.offline_bolt_outlined,
                   color: ElevenwardColors.grass,
                 ),
@@ -906,27 +1202,33 @@ final class SettingsScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           _Section(uiCopy(locale, 'versionDetails')),
-          FutureBuilder<PackageInfo>(
-            future: PackageInfo.fromPlatform(),
-            builder: (context, snapshot) => _Card(
-              children: [
-                _ValueRow(
-                  label: uiCopy(locale, 'appVersion'),
-                  value: snapshot.hasData
-                      ? '${snapshot.data!.version} (${snapshot.data!.buildNumber})'
-                      : '—',
-                ),
-                _ValueRow(
-                  label: uiCopy(locale, 'contentVersionLabel'),
-                  value:
-                      controller.activeContent?.version ??
-                      controller.activeCareer!.contentVersion,
-                ),
-                _ValueRow(
-                  label: uiCopy(locale, 'rulesVersionLabel'),
-                  value: controller.activeCareer!.rulesVersion,
-                ),
-              ],
+          // Start the platform request only when this lazy list child mounts.
+          Builder(
+            builder: (context) => FutureBuilder<PackageInfo>(
+              future: PackageInfo.fromPlatform(),
+              builder: (context, snapshot) => _Card(
+                children: [
+                  _ValueRow(
+                    label: uiCopy(locale, 'appVersion'),
+                    value: snapshot.hasData
+                        ? '${snapshot.data!.version} (${snapshot.data!.buildNumber})'
+                        : '—',
+                  ),
+                  _ValueRow(
+                    label: uiCopy(locale, 'contentVersionLabel'),
+                    value:
+                        controller.activeContent?.version ??
+                        controller.activeCareer?.contentVersion ??
+                        '—',
+                  ),
+                  _ValueRow(
+                    label: uiCopy(locale, 'rulesVersionLabel'),
+                    value:
+                        controller.activeCareer?.rulesVersion ??
+                        CareerSnapshot.currentRulesVersion,
+                  ),
+                ],
+              ),
             ),
           ),
         ],
@@ -972,6 +1274,38 @@ final class SettingsScreen extends StatelessWidget {
       selected == 'system' ? null : Locale(selected),
     );
   }
+
+  Future<void> _chooseDisplayMode(BuildContext context) async {
+    final locale = contentLocale(context);
+    final selected = await showModalBottomSheet<ThemeMode>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: RadioGroup<ThemeMode>(
+          groupValue: controller.displayMode,
+          onChanged: (value) => Navigator.pop(context, value),
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.dark,
+                title: Text(uiCopy(locale, 'displayDark')),
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.light,
+                title: Text(uiCopy(locale, 'displayLight')),
+              ),
+              RadioListTile<ThemeMode>(
+                value: ThemeMode.system,
+                title: Text(uiCopy(locale, 'displaySystem')),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected != null) await controller.changeDisplayMode(selected);
+  }
 }
 
 final class AccountScreen extends StatefulWidget {
@@ -985,11 +1319,36 @@ final class AccountScreen extends StatefulWidget {
 
 final class _AccountScreenState extends State<AccountScreen> {
   late Future<List<PreservedConflict>> _conflicts;
+  SyncUiStatus? _lastSyncStatus;
+  int? _lastCareerGeneration;
 
   @override
   void initState() {
     super.initState();
     _conflicts = widget.controller.store.listConflicts();
+    _lastSyncStatus = widget.controller.syncStatus;
+    _lastCareerGeneration = widget.controller.activeCareerGeneration;
+    widget.controller.addListener(_refreshConflicts);
+  }
+
+  void _refreshConflicts() {
+    final controller = widget.controller;
+    if (_lastSyncStatus != controller.syncStatus ||
+        _lastCareerGeneration != controller.activeCareerGeneration) {
+      _lastSyncStatus = controller.syncStatus;
+      _lastCareerGeneration = controller.activeCareerGeneration;
+      if (mounted) {
+        setState(() {
+          _conflicts = controller.store.listConflicts();
+        });
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_refreshConflicts);
+    super.dispose();
   }
 
   @override
@@ -1012,7 +1371,7 @@ final class _AccountScreenState extends State<AccountScreen> {
                 Icon(
                   controller.account == null
                       ? Icons.cloud_off_outlined
-                      : Icons.cloud_done_outlined,
+                      : Icons.person_outline_rounded,
                   color: controller.account == null
                       ? ElevenwardColors.sky
                       : ElevenwardColors.grass,
@@ -1027,7 +1386,8 @@ final class _AccountScreenState extends State<AccountScreen> {
                         controller.account == null
                             ? context.l10n.guestMode
                             : context.l10n.signedInAs(
-                                controller.account!.alias,
+                                controller.account!.publicUsername ??
+                                    controller.account!.alias,
                               ),
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
@@ -1042,6 +1402,8 @@ final class _AccountScreenState extends State<AccountScreen> {
           if (controller.account == null) ...[
             const SizedBox(height: 22),
             _Section(uiCopy(locale, 'account')),
+            Text(uiCopy(locale, 'accountOnlineBenefits')),
+            const SizedBox(height: 10),
             _Card(
               children: [
                 if (Platform.isIOS)
@@ -1062,6 +1424,49 @@ final class _AccountScreenState extends State<AccountScreen> {
               ],
             ),
           ] else ...[
+            const SizedBox(height: 22),
+            _Section(uiCopy(locale, 'publicLeaderboardName')),
+            _Card(
+              children: [
+                ListTile(
+                  key: const Key('account-public-username'),
+                  leading: const Icon(Icons.badge_outlined),
+                  title: Text(uiCopy(locale, 'publicLeaderboardName')),
+                  subtitle: Text(
+                    controller.account!.usernameStatus == 'suspended'
+                        ? uiCopy(locale, 'usernameSuspended')
+                        : controller.account!.publicUsername ??
+                              uiCopy(locale, 'generatedAliasShown'),
+                  ),
+                ),
+                if (controller.account!.usernameStatus != 'suspended')
+                  ListTile(
+                    key: const Key('account-change-public-username'),
+                    leading: const Icon(Icons.edit_outlined),
+                    title: Text(
+                      uiCopy(
+                        locale,
+                        controller.account!.publicUsername == null
+                            ? 'claimLeaderboardName'
+                            : 'changeLeaderboardName',
+                      ),
+                    ),
+                    subtitle: controller.account!.usernameCanChangeAt != null
+                        ? Text(
+                            '${uiCopy(locale, 'nextUsernameChange')} '
+                            '${MaterialLocalizations.of(context).formatMediumDate(controller.account!.usernameCanChangeAt!.toLocal())}',
+                          )
+                        : null,
+                    enabled:
+                        !controller.busy &&
+                        (controller.account!.usernameCanChangeAt == null ||
+                            !controller.account!.usernameCanChangeAt!.isAfter(
+                              DateTime.now().toUtc(),
+                            )),
+                    onTap: () => _showUsernameDialog(context),
+                  ),
+              ],
+            ),
             const SizedBox(height: 22),
             _Section(uiCopy(locale, 'cloudSync')),
             _Card(
@@ -1090,6 +1495,30 @@ final class _AccountScreenState extends State<AccountScreen> {
                   enabled: !controller.busy,
                   onTap: controller.synchronize,
                 ),
+                if (controller.lastBackupAt != null)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      lastBackupLabel(context, controller.lastBackupAt!),
+                    ),
+                  ),
+                for (final slot in controller.slots.where(
+                  (slot) => slot.snapshot != null,
+                ))
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          slot.snapshot!.player.name,
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        const SizedBox(height: 5),
+                        SlotBackupStatus(controller: controller, slot: slot),
+                      ],
+                    ),
+                  ),
               ],
             ),
             FutureBuilder<List<PreservedConflict>>(
@@ -1139,13 +1568,13 @@ final class _AccountScreenState extends State<AccountScreen> {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(
+                  leading: Icon(
                     Icons.delete_forever_outlined,
                     color: ElevenwardColors.coral,
                   ),
                   title: Text(
                     context.l10n.deleteAccount,
-                    style: const TextStyle(color: ElevenwardColors.coral),
+                    style: TextStyle(color: ElevenwardColors.coral),
                   ),
                   enabled: !controller.busy,
                   onTap: () => _confirmAccountDeletion(context),
@@ -1158,7 +1587,7 @@ final class _AccountScreenState extends State<AccountScreen> {
             Text(
               controller.lastMessage!,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: ElevenwardColors.amber),
+              style: TextStyle(color: ElevenwardColors.amber),
             ),
           ],
         ],
@@ -1182,6 +1611,106 @@ final class _AccountScreenState extends State<AccountScreen> {
       return uiCopy(locale, 'syncFailedSafe');
     }
     return null;
+  }
+
+  Future<void> _showUsernameDialog(BuildContext context) async {
+    final locale = contentLocale(context);
+    final input = TextEditingController(
+      text: widget.controller.account?.publicUsername ?? '',
+    );
+    String? error;
+    var saving = false;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text(
+            uiCopy(
+              locale,
+              widget.controller.account?.publicUsername == null
+                  ? 'claimLeaderboardName'
+                  : 'changeLeaderboardName',
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(uiCopy(locale, 'usernameRules')),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('public-username-input'),
+                controller: input,
+                maxLength: 20,
+                autocorrect: false,
+                textCapitalization: TextCapitalization.none,
+                decoration: InputDecoration(
+                  labelText: uiCopy(locale, 'publicLeaderboardName'),
+                  errorText: error,
+                  border: const OutlineInputBorder(),
+                ),
+                onChanged: (_) => setDialogState(() => error = null),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
+              child: Text(MaterialLocalizations.of(context).cancelButtonLabel),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final username = input.text.trim();
+                      if (!RegExp(r'^[A-Za-z][A-Za-z0-9]*(?:_[A-Za-z0-9]+)*$')
+                              .hasMatch(username) ||
+                          username.length < 3 ||
+                          username.length > 20) {
+                        setDialogState(
+                          () => error = uiCopy(locale, 'usernameInvalid'),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      final success = await widget.controller
+                          .updatePublicUsername(username);
+                      if (!dialogContext.mounted) return;
+                      if (success) {
+                        Navigator.pop(dialogContext);
+                      } else {
+                        setDialogState(() {
+                          saving = false;
+                          error = switch (widget.controller.lastMessage) {
+                            'username_taken' => uiCopy(locale, 'usernameTaken'),
+                            'username_cooldown' => uiCopy(
+                              locale,
+                              'usernameCooldown',
+                            ),
+                            'username_suspended' => uiCopy(
+                              locale,
+                              'usernameSuspended',
+                            ),
+                            'username_reserved' || 'username_not_allowed' =>
+                              uiCopy(locale, 'usernameNotAllowed'),
+                            'username_format' || 'username_length' => uiCopy(
+                              locale,
+                              'usernameInvalid',
+                            ),
+                            _ => uiCopy(locale, 'usernameSaveFailed'),
+                          };
+                        });
+                      }
+                    },
+              child: Text(
+                saving ? uiCopy(locale, 'saving') : uiCopy(locale, 'save'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    input.dispose();
   }
 
   Future<void> _resolve(PreservedConflict conflict, bool keepLocal) async {
@@ -1276,7 +1805,7 @@ final class _Section extends StatelessWidget {
     padding: const EdgeInsetsDirectional.only(start: 4, bottom: 9),
     child: Text(
       title.toUpperCase(),
-      style: const TextStyle(
+      style: TextStyle(
         color: ElevenwardColors.grass,
         fontSize: 11,
         fontWeight: FontWeight.w900,
@@ -1301,7 +1830,7 @@ final class _Card extends StatelessWidget {
     return Material(
       color: ElevenwardColors.panel,
       shape: RoundedRectangleBorder(
-        side: const BorderSide(color: ElevenwardColors.line),
+        side: BorderSide(color: ElevenwardColors.line),
         borderRadius: BorderRadius.circular(ElevenwardRadii.card),
       ),
       clipBehavior: Clip.antiAlias,
@@ -1319,22 +1848,34 @@ final class _ValueRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: Text(label)),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value,
-            textAlign: TextAlign.end,
-            style: const TextStyle(
-              color: ElevenwardColors.cream,
-              fontWeight: FontWeight.w800,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final largeText = MediaQuery.textScalerOf(context).scale(14) > 20;
+        final valueStyle = TextStyle(
+          color: ElevenwardColors.cream,
+          fontWeight: FontWeight.w800,
+        );
+        if (largeText || constraints.maxWidth < 240) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(label),
+              const SizedBox(height: 5),
+              Text(value, style: valueStyle),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: Text(label)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(value, textAlign: TextAlign.end, style: valueStyle),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     ),
   );
 }
@@ -1353,6 +1894,7 @@ final class _ConflictCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final locale = contentLocale(context);
+    final remote = conflict.remoteSnapshot;
     return BroadcastPanel(
       accent: ElevenwardColors.amber,
       child: Column(
@@ -1364,20 +1906,25 @@ final class _ConflictCard extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            conflict.localDeleted
-                ? '${uiCopy(locale, 'local')}: ${uiCopy(locale, 'deleted')}'
-                : '${uiCopy(locale, 'local')}: ${conflict.localSnapshot.clubName} · ${uiCopy(locale, 'season')} ${conflict.localSnapshot.season} · ${uiCopy(locale, 'week')} ${conflict.localSnapshot.week}',
+            conflictSideLabel(
+              context,
+              conflict.localSnapshot,
+              side: 'local',
+              deleted: conflict.localDeleted,
+            ),
           ),
-          Text(
-            '${uiCopy(locale, 'cloud')}: ${conflict.remoteSnapshot.clubName} · ${uiCopy(locale, 'season')} ${conflict.remoteSnapshot.season} · ${uiCopy(locale, 'week')} ${conflict.remoteSnapshot.week}',
-          ),
+          Text(conflictSideLabel(context, remote, side: 'cloud')),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   onPressed: busy ? null : () => onResolve(false),
-                  child: Text(uiCopy(locale, 'keepCloud')),
+                  child: Text(
+                    remote == null
+                        ? featureCopy(locale, 'useCloudDeletion')
+                        : uiCopy(locale, 'keepCloud'),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1417,7 +1964,7 @@ final class _CareerHonours extends StatelessWidget {
             children: [
               Row(
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.emoji_events_rounded,
                     color: ElevenwardColors.amber,
                   ),
@@ -1433,7 +1980,7 @@ final class _CareerHonours extends StatelessWidget {
                   ),
                   Text(
                     '${honours.length}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       color: ElevenwardColors.amber,
                       fontSize: 24,
                       fontWeight: FontWeight.w900,
@@ -1445,7 +1992,7 @@ final class _CareerHonours extends StatelessWidget {
               if (honours.isEmpty)
                 Text(
                   uiCopy(locale, 'noHonoursYet'),
-                  style: const TextStyle(color: ElevenwardColors.muted),
+                  style: TextStyle(color: ElevenwardColors.muted),
                 )
               else
                 Wrap(
@@ -1523,12 +2070,15 @@ final class _SeasonArchive extends StatelessWidget {
               subtitle: Text(
                 '${season.appearances} ${uiCopy(locale, 'apps')} · ${season.goals} ${uiCopy(locale, 'goals')} · '
                 '${season.assists} ${uiCopy(locale, 'assists')} · ${season.averageRating.toStringAsFixed(1)} ${uiCopy(locale, 'rating')}'
-                '${season.trophies.isEmpty ? '' : '\n${season.trophies.join(' · ')}'}',
+                '${season.trophies.isEmpty ? '' : '\n${season.trophies.join(' · ')}'}'
+                '${_previousSeason(career, season) == null ? '' : '\n${seasonComparison(locale, season, _previousSeason(career, season)!)}'}',
               ),
-              isThreeLine: season.trophies.isNotEmpty,
+              isThreeLine:
+                  season.trophies.isNotEmpty ||
+                  _previousSeason(career, season) != null,
               trailing: season.trophies.isEmpty
                   ? null
-                  : const Icon(
+                  : Icon(
                       Icons.emoji_events_outlined,
                       color: ElevenwardColors.amber,
                     ),
@@ -1538,3 +2088,8 @@ final class _SeasonArchive extends StatelessWidget {
     );
   }
 }
+
+SeasonSummary? _previousSeason(CareerSnapshot career, SeasonSummary season) =>
+    career.seasonHistory
+        .where((item) => item.season == season.season - 1)
+        .firstOrNull;

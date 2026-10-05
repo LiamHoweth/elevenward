@@ -36,17 +36,23 @@ Map<String, Object?> _item(LifestyleItemDefinition item) => {
 
 void main(List<String> arguments) {
   final destination = arguments.isEmpty
-      ? 'assets/content/launch-2026.3.0.json'
+      ? 'assets/content/launch-2026.4.0.json'
       : arguments.single;
   final world = buildLaunchWorld();
-  final content = buildLaunchContent();
+  final content = destination.contains('2026.3.0')
+      ? buildLaunchContent()
+      : buildLatestContent();
   final bundle = <String, Object?>{
     'metadata': {
       'releaseVersion': content.version,
-      'minClientVersion': '0.1.0',
+      'minClientVersion': content.version == '2026.4.0' ? '1.1.0' : '0.1.0',
       'maxClientVersion': '1.99.99',
-      'rulesVersion': CareerSnapshot.currentRulesVersion,
-      'generatedAt': '2026-09-03T00:00:00.000Z',
+      'rulesVersion': content.version == '2026.3.0'
+          ? '2026.4'
+          : CareerSnapshot.currentRulesVersion,
+      'generatedAt': content.version == '2026.4.0'
+          ? '2026-10-01T00:00:00.000Z'
+          : '2026-09-03T00:00:00.000Z',
     },
     'countries': world.countries.map((country) => country.toJson()).toList(),
     'clubs': world.clubs.map(_club).toList(),

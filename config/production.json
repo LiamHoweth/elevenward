@@ -1,5 +1,6 @@
 {
   "ELEVENWARD_API_BASE_URL": "https://api.howethstudio.com",
   "ELEVENWARD_GOOGLE_SERVER_CLIENT_ID": "979143231399-16ejt674m9m9606ajth67nvqc56nm3nm.apps.googleusercontent.com",
-  "REVENUECAT_IOS_PUBLIC_KEY": "appl_tOpejLPJVgmTpPiIocPmBlQZCkr"
+  "REVENUECAT_IOS_PUBLIC_KEY": "appl_tOpejLPJVgmTpPiIocPmBlQZCkr",
+  "ELEVENWARD_CONTENT_PUBLIC_KEY_BASE64": "ZD7T5NljtuLNtxrftYCUrbq7sfthCoTh3hs3g4zDHxI="
 }

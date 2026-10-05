@@ -141,12 +141,14 @@ final class SeasonPerformance {
     required int goals,
     required int assists,
     required double rating,
+    bool countOnlyAppearances = false,
   }) =>
       SeasonPerformance(
         appearances: appearances + (appeared ? 1 : 0),
         goals: this.goals + goals,
         assists: this.assists + assists,
-        ratingTenths: ratingTenths + (rating * 10).round(),
+        ratingTenths: ratingTenths +
+            ((!countOnlyAppearances || appeared) ? (rating * 10).round() : 0),
         ratedMatches: ratedMatches + (appeared ? 1 : 0),
       );
 

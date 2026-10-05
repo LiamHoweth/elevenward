@@ -42,6 +42,7 @@ jobs:
           pattern: production-careers-*
           path: artifacts/verification
           merge-multiple: true
+      - run: cd packages/elevenward_core && dart pub get
       - name: Require all 100,000 real careers and coverage dimensions
         run: dart packages/elevenward_core/bin/merge_production_reports.dart --output artifacts/verification/production-100000.json artifacts/verification/production-shard-*.json
       - uses: actions/upload-artifact@v4

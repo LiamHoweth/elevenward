@@ -60,6 +60,24 @@ final class CountryDefinition {
       };
 }
 
+enum ClubPlayingStyle {
+  possession,
+  highPress,
+  counterAttack,
+  direct,
+  defensive
+}
+
+extension ClubPlayingStyleLabel on ClubPlayingStyle {
+  String get label => switch (this) {
+        ClubPlayingStyle.possession => 'Possession football',
+        ClubPlayingStyle.highPress => 'High press',
+        ClubPlayingStyle.counterAttack => 'Counter attack',
+        ClubPlayingStyle.direct => 'Direct football',
+        ClubPlayingStyle.defensive => 'Defensive structure',
+      };
+}
+
 final class ClubDefinition {
   const ClubDefinition({
     required this.id,
@@ -84,6 +102,11 @@ final class ClubDefinition {
   final int defense;
   final int primaryColor;
   final int secondaryColor;
+
+  // A stable authored identity derived from immutable club data; seed and
+  // current opponents never change the club's system.
+  ClubPlayingStyle get playingStyle => ClubPlayingStyle
+      .values[(attack + defense + quality) % ClubPlayingStyle.values.length];
 
   Map<String, Object?> toJson() => {
         'id': id,
