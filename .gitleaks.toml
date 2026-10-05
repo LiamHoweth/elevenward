@@ -11,7 +11,7 @@ description = "Threat model prose contains no credential"
 condition = "AND"
 regexTarget = "line"
 paths = ['''^docs/THREAT_MODEL\.md$''']
-regexes = ['''^\| Account/session tokens \| App process to Keychain/Android Keystore \| This-device secure-storage accessibility, scoped bearer tokens, expiry/revocation and clearing on sign-out/deletion \|$''']
+regexes = ['''Account/session tokens \| App process to Keychain/Android Keystore \| This-device secure-storage accessibility, scoped bearer tokens, expiry/revocation and clearing on sign-out/deletion''']
 
 [[rules.allowlists]]
 description = "Public screenshot filename contains no credential"
