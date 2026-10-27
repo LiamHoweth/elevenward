@@ -1,6 +1,30 @@
 import 'package:elevenward_core/elevenward_core.dart';
 
 const uiCopyTranslations = <String, Map<String, String>>{
+  'supportCreator': {
+    'en': 'Support the creator',
+    'es': 'Apoya al creador',
+    'pt-BR': 'Apoie o criador',
+    'fr': 'Soutenir le créateur',
+  },
+  'followInstagram': {
+    'en': 'Follow on Instagram.',
+    'es': 'Sigue al creador en Instagram.',
+    'pt-BR': 'Siga o criador no Instagram.',
+    'fr': 'Suivez le créateur sur Instagram.',
+  },
+  'leagueTitle': {
+    'en': 'League title',
+    'es': 'Título de liga',
+    'pt-BR': 'Título da liga',
+    'fr': 'Titre de champion',
+  },
+  'majorTrophy': {
+    'en': 'Major trophy',
+    'es': 'Título importante',
+    'pt-BR': 'Título importante',
+    'fr': 'Titre majeur',
+  },
   'discoverElevenward': {
     'en': 'Discover Elevenward',
     'es': 'Descubre Elevenward',

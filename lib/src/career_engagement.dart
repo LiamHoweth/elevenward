@@ -81,6 +81,33 @@ List<String> currentSeasonTrophies(CareerSnapshot career) {
   ];
 }
 
+/// Trophy records keep stable engine IDs; presentation resolves their names
+/// without rewriting a save or depending on a future content catalog.
+String localizedCareerTrophy(
+  String trophy,
+  WorldDefinition world,
+  String locale,
+) {
+  if (trophy == 'league-title') return uiCopy(locale, 'leagueTitle');
+  if (trophy == 'world-nations-championship' ||
+      trophy == 'major-national-tournament') {
+    return uiCopy(locale, 'worldNations');
+  }
+  if (trophy == world.internationalClubCompetition.id) {
+    return uiCopy(locale, 'internationalClub');
+  }
+  final cup = world.domesticCups.where((cup) => cup.id == trophy).firstOrNull;
+  if (cup != null) {
+    final country = world.countries
+        .where((country) => country.id == cup.countryId)
+        .firstOrNull;
+    return country == null
+        ? uiCopy(locale, 'domesticCup')
+        : '${uiCopy(locale, 'domesticCup')} · ${country.nameFor(locale)}';
+  }
+  return uiCopy(locale, 'majorTrophy');
+}
+
 int _metric(CareerSnapshot career, CareerMilestoneKind kind) => switch (kind) {
   CareerMilestoneKind.appearances => career.player.appearances,
   CareerMilestoneKind.goals => career.player.goals,

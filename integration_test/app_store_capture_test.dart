@@ -16,6 +16,7 @@ import 'package:elevenward/src/game_screen.dart';
 import 'package:elevenward/src/screens/career_hub_screen.dart';
 import 'package:elevenward/src/screens/life_screen.dart';
 import 'package:elevenward/src/screens/more_detail_screens.dart';
+import 'package:elevenward/src/screens/shop_screen.dart';
 import 'package:elevenward/src/screens/world_screen.dart';
 import 'package:elevenward/src/services/analytics_service.dart';
 import 'package:elevenward/src/services/auth_service.dart';
@@ -34,6 +35,7 @@ const _deviceClass = String.fromEnvironment(
   'APP_STORE_DEVICE_CLASS',
   defaultValue: 'iphone-65',
 );
+const _onlyScene = String.fromEnvironment('APP_STORE_CAPTURE_ONLY_SCENE');
 
 const _locales = <(String, Locale)>[
   ('en', Locale('en')),
@@ -118,6 +120,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 400));
       debugPrint('[capture] spotlight rendered');
       final boldChoice = find.byKey(const Key('spotlight-option-bold'));
+      if (boldChoice.evaluate().isEmpty) {
+        await tester.scrollUntilVisible(
+          boldChoice,
+          300,
+          scrollable: find.byType(Scrollable).first,
+          maxScrolls: 20,
+        );
+      }
       await Scrollable.ensureVisible(
         tester.element(boldChoice),
         alignment: .84,
@@ -133,7 +143,7 @@ void main() {
           body: SafeArea(
             child: WorldScreen(
               career: fixture.midCareer,
-              definition: buildLaunchWorld(),
+              definition: buildLatestContent().world,
             ),
           ),
         ),
@@ -195,7 +205,7 @@ void main() {
           body: SafeArea(
             child: LifeScreen(
               controller: controller,
-              contentCatalog: buildLaunchContent(),
+              contentCatalog: buildLatestContent(),
             ),
           ),
         ),
@@ -227,6 +237,33 @@ void main() {
       await _mount(tester, locale, CareerHubScreen(controller: controller));
       await _capture(tester, localeKey, '08-career-hub');
       controller.stage = AppStage.playing;
+    }
+
+    // Review evidence uses the real shop with uninitialized billing. Never
+    // purchase, restore, inject ownership, or manufacture a localized price.
+    controller.locale = const Locale('en');
+    expect(controller.entitlementState.ownedPasses, isEmpty);
+    await _mount(
+      tester,
+      const Locale('en'),
+      ShopScreen(controller: controller),
+    );
+    const reviewScenes = <GamePassId, String>{
+      GamePassId.allAccess: 'iap-all-access',
+      GamePassId.vip: 'iap-vip',
+      GamePassId.doubleDevelopment: 'iap-double-development',
+      GamePassId.doubleMoney: 'iap-double-money',
+    };
+    for (final definition in gamePassDefinitions) {
+      final card = find.byKey(Key('gamepass-${definition.id.name}'));
+      await tester.scrollUntilVisible(card, 420, maxScrolls: 20);
+      await Scrollable.ensureVisible(
+        tester.element(card),
+        alignment: .28,
+        duration: Duration.zero,
+      );
+      await tester.pump(const Duration(milliseconds: 500));
+      await _capture(tester, 'en', reviewScenes[definition.id]!);
     }
 
     await store.close();
@@ -283,6 +320,14 @@ Future<void> _mount(WidgetTester tester, Locale locale, Widget screen) async {
           const AssetImage('assets/visual/stadium-graphite.png'),
           context,
         ),
+        precacheImage(
+          const AssetImage('assets/visual/player_portraits/player_01.webp'),
+          context,
+        ),
+        precacheImage(
+          const AssetImage('assets/visual/shop-all-access.png'),
+          context,
+        ),
       ]);
     });
   }
@@ -300,10 +345,24 @@ Future<void> _mount(WidgetTester tester, Locale locale, Widget screen) async {
   }
 }
 
-Future<void> _capture(WidgetTester _, String locale, String source) async {
-  debugPrint('APP_STORE_CAPTURE_READY|$locale|$_deviceClass|$source');
-  // Give the host-side simctl process a stable, already-painted frame. A
-  // blocking wait is deliberate here because widget-test timers use a virtual
-  // clock and otherwise advance without giving the host time to save.
-  sleep(const Duration(milliseconds: 1800));
+Future<void> _capture(WidgetTester tester, String locale, String source) async {
+  if (_onlyScene.isNotEmpty && source != _onlyScene) return;
+  final acknowledgment = File(
+    p.join(Directory.systemTemp.path, 'elevenward-store-$locale-$source.ack'),
+  );
+  if (acknowledgment.existsSync()) acknowledgment.deleteSync();
+  await tester.runAsync(() async {
+    debugPrint(
+      'APP_STORE_CAPTURE_READY|$locale|$_deviceClass|$source|'
+      '${acknowledgment.path}',
+    );
+    final timeout = DateTime.now().add(const Duration(seconds: 45));
+    while (!acknowledgment.existsSync()) {
+      if (DateTime.now().isAfter(timeout)) {
+        throw StateError('Host did not acknowledge $locale/$source capture.');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 75));
+    }
+    acknowledgment.deleteSync();
+  });
 }

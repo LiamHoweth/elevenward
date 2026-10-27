@@ -5,6 +5,44 @@ import 'package:elevenward_core/elevenward_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('career honours resolve saved trophy IDs in all launch languages', () {
+    for (final world in [
+      buildLaunchContent().world,
+      buildLatestContent().world,
+    ]) {
+      for (final locale in ['en', 'es', 'pt-BR', 'fr']) {
+        for (final id in [
+          'league-title',
+          'world-nations-championship',
+          'major-national-tournament',
+          world.internationalClubCompetition.id,
+          ...world.domesticCups.map((cup) => cup.id),
+          'future-retired-competition',
+        ]) {
+          final display = localizedCareerTrophy(id, world, locale);
+          expect(display, isNot(id), reason: '$locale leaked $id');
+          expect(display.trim(), isNotEmpty);
+        }
+        expect(
+          localizedCareerTrophy('league-title', world, locale),
+          uiCopy(locale, 'leagueTitle'),
+        );
+        expect(
+          localizedCareerTrophy('world-nations-championship', world, locale),
+          uiCopy(locale, 'worldNations'),
+        );
+        expect(
+          localizedCareerTrophy('future-retired-competition', world, locale),
+          uiCopy(locale, 'majorTrophy'),
+        );
+        final cup = world.domesticCups.first;
+        expect(
+          localizedCareerTrophy(cup.id, world, locale),
+          contains(world.country(cup.countryId!).nameFor(locale)),
+        );
+      }
+    }
+  });
   test('tied points outside the top two do not claim a promotion place', () {
     final world = buildLaunchWorld();
     final league = world.leagues.firstWhere(

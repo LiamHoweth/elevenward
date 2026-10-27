@@ -10,6 +10,9 @@ final class StudioMarketingLinks {
 
   final String websiteBaseUrl;
 
+  /// Owner-provided public profile, without career or device identifiers.
+  Uri get creatorInstagramUrl => Uri.https('www.instagram.com', '/beopity/');
+
   Uri? get _origin {
     final uri = Uri.tryParse(websiteBaseUrl.trim());
     if (uri == null ||

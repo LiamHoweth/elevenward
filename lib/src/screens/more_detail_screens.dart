@@ -461,7 +461,7 @@ final class LegacyScreen extends StatelessWidget {
           ),
           const SizedBox(height: 22),
           _Section(context.l10n.legacy),
-          _CareerHonours(career: career),
+          _CareerHonours(career: career, definition: world),
           const SizedBox(height: 10),
           _SeasonArchive(
             career: career,
@@ -1943,9 +1943,10 @@ final class _ConflictCard extends StatelessWidget {
 }
 
 final class _CareerHonours extends StatelessWidget {
-  const _CareerHonours({required this.career});
+  const _CareerHonours({required this.career, required this.definition});
 
   final CareerSnapshot career;
+  final WorldDefinition definition;
 
   @override
   Widget build(BuildContext context) {
@@ -2006,7 +2007,7 @@ final class _CareerHonours extends StatelessWidget {
                             size: 16,
                           ),
                           label: Text(
-                            '${honour.trophy} · ${uiCopy(locale, 'seasonLabel')} ${honour.season}',
+                            '${localizedCareerTrophy(honour.trophy, definition, locale)} · ${uiCopy(locale, 'seasonLabel')} ${honour.season}',
                           ),
                         ),
                       )
@@ -2070,7 +2071,7 @@ final class _SeasonArchive extends StatelessWidget {
               subtitle: Text(
                 '${season.appearances} ${uiCopy(locale, 'apps')} · ${season.goals} ${uiCopy(locale, 'goals')} · '
                 '${season.assists} ${uiCopy(locale, 'assists')} · ${season.averageRating.toStringAsFixed(1)} ${uiCopy(locale, 'rating')}'
-                '${season.trophies.isEmpty ? '' : '\n${season.trophies.join(' · ')}'}'
+                '${season.trophies.isEmpty ? '' : '\n${season.trophies.map((trophy) => localizedCareerTrophy(trophy, definition, locale)).join(' · ')}'}'
                 '${_previousSeason(career, season) == null ? '' : '\n${seasonComparison(locale, season, _previousSeason(career, season)!)}'}',
               ),
               isThreeLine:

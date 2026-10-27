@@ -23,8 +23,8 @@ final class AppStoreCareerFixtureBuilder {
   static const _engine = CareerEngine();
 
   AppStoreCareerFixture build({int maximumSeed = 500}) {
-    final world = buildLaunchWorld();
-    final catalog = buildLaunchContent();
+    final catalog = buildLatestContent();
+    final world = catalog.world;
     for (var seed = 1; seed <= maximumSeed; seed++) {
       var snapshot = CareerSnapshot.newCareer(
         careerId: 'app-store-career',
@@ -37,6 +37,7 @@ final class AppStoreCareerFixtureBuilder {
           name: 'Mika Vale',
           archetype: Archetype.completeForward,
           nationalTeamId: 'united-states',
+          portraitId: 'player_01',
         ),
       );
       CareerSnapshot? midCareer;
@@ -46,7 +47,9 @@ final class AppStoreCareerFixtureBuilder {
         if (midCareer == null && _isQualifiedMidCareer(snapshot, world)) {
           final qualifyingSeason = snapshot.season;
           while (snapshot.season == qualifyingSeason &&
-              (snapshot.phase != CareerPhase.inSeason || snapshot.week < 8)) {
+              (snapshot.phase != CareerPhase.inSeason ||
+                  snapshot.week < 8 ||
+                  snapshot.pendingEventId != null)) {
             snapshot = _advance(snapshot, world, catalog);
           }
           if (snapshot.phase == CareerPhase.inSeason) {
@@ -80,6 +83,22 @@ final class AppStoreCareerFixtureBuilder {
     WorldDefinition world,
     ContentCatalog catalog,
   ) {
+    final pending = _engine.pendingEvent(snapshot, catalog);
+    if (pending != null) {
+      final affordable = pending.choices
+          .where(
+            (choice) =>
+                choice.moneyDelta >= 0 ||
+                snapshot.player.money >= -choice.moneyDelta,
+          )
+          .toList();
+      return _engine.applyEventChoice(
+        snapshot: snapshot,
+        event: pending,
+        choice: affordable[(snapshot.seed + snapshot.week) % affordable.length],
+        updatedAt: snapshot.updatedAt.add(const Duration(minutes: 1)),
+      );
+    }
     if (snapshot.phase == CareerPhase.internationalCallup) {
       return _engine.decideNationalTeamCallUp(
         snapshot: snapshot,
@@ -119,15 +138,21 @@ final class AppStoreCareerFixtureBuilder {
             ),
             updatedAt: snapshot.updatedAt.add(const Duration(days: 7)),
             definition: world,
+            catalog: catalog,
           )
           .snapshot;
       if (wasClubSeason && next.phase == CareerPhase.inSeason) {
-        final events = _engine.eligibleEvents(next, catalog);
-        if (events.isNotEmpty) {
-          final event =
-              events[(next.seed ^ next.revision).abs() % events.length];
+        final event = _engine.pendingEvent(next, catalog);
+        if (event != null) {
+          final affordable = event.choices
+              .where(
+                (choice) =>
+                    choice.moneyDelta >= 0 ||
+                    next.player.money >= -choice.moneyDelta,
+              )
+              .toList();
           final choice =
-              event.choices[(next.seed + next.week) % event.choices.length];
+              affordable[(next.seed + next.week) % affordable.length];
           next = _engine.applyEventChoice(
             snapshot: next,
             event: event,
@@ -159,6 +184,7 @@ final class AppStoreCareerFixtureBuilder {
 
   bool _isQualifiedMidCareer(CareerSnapshot snapshot, WorldDefinition world) {
     if (snapshot.phase != CareerPhase.inSeason ||
+        snapshot.pendingEventId != null ||
         snapshot.player.age < 26 ||
         snapshot.player.age > 29 ||
         snapshot.player.overall < 80 ||

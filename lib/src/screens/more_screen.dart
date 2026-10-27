@@ -164,6 +164,16 @@ final class MoreScreen extends StatelessWidget {
                   body: context.l10n.careerSlotsIntro,
                   onTap: controller.showCareerSlots,
                 ),
+                const SizedBox(height: 12),
+                _SectionLabel(uiCopy(locale, 'supportCreator')),
+                _HubDestination(
+                  key: const Key('creator-instagram'),
+                  icon: Icons.favorite_outline_rounded,
+                  title: 'Instagram · @beopity',
+                  body: uiCopy(locale, 'followInstagram'),
+                  onTap: () =>
+                      _openWebsite(context, marketingLinks.creatorInstagramUrl),
+                ),
               ],
             ),
           ),
@@ -179,6 +189,10 @@ final class MoreScreen extends StatelessWidget {
   Future<void> _openStudio(BuildContext context) async {
     final uri = marketingLinks.studioDiscoveryUrl;
     if (uri == null) return;
+    await _openWebsite(context, uri);
+  }
+
+  Future<void> _openWebsite(BuildContext context, Uri uri) async {
     try {
       if (await launchUrl(uri, mode: LaunchMode.externalApplication)) return;
     } on Object {
